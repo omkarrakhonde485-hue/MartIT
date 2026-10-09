@@ -2,14 +2,23 @@ import { cn } from '@/utils/cn'
 
 /**
  * MartIT logo: raster mark (from the supplied logo artwork) + live-text wordmark,
- * so the wordmark adapts to dark mode. Replace /brand/logo-mark.png with an SVG
+ * so the wordmark adapts to dark mode. Replace /brand/logo-mark-*.webp with an SVG
  * export when the original vector file is available.
  */
 export function Logo({ className, markOnly = false, size = 'md' }) {
   const h = size === 'lg' ? 'h-9' : size === 'sm' ? 'h-6' : 'h-7'
+  const base = size === 'lg' ? 36 : 28 // right-sized WebP exports in /public/brand
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
-      <img src="/brand/logo-mark.png" alt={markOnly ? 'MartIT' : ''} className={cn(h, 'w-auto')} width="351" height="134" decoding="async" />
+      <img
+        src={`/brand/logo-mark-${base}.webp`}
+        srcSet={`/brand/logo-mark-${base}.webp 1x, /brand/logo-mark-${base * 2}.webp 2x`}
+        alt={markOnly ? 'MartIT' : ''}
+        className={cn(h, 'w-auto')}
+        width={Math.round((351 / 134) * base)}
+        height={base}
+        decoding="async"
+      />
       {!markOnly && (
         <span
           className={cn(

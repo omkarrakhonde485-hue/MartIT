@@ -26,7 +26,7 @@ export function PageTransition() {
           scrollTo(el)
           el.setAttribute('tabindex', '-1')
           el.focus({ preventScroll: true })
-        } else if (tries++ < 60) raf = requestAnimationFrame(seek)
+        } else if (tries++ < 240) raf = requestAnimationFrame(seek) // ~4s: target may be in a lazy chunk
       }
       raf = requestAnimationFrame(seek)
       return () => cancelAnimationFrame(raf)

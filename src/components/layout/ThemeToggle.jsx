@@ -2,9 +2,11 @@ import { AnimatePresence, m } from 'motion/react'
 import { Moon, Sun } from 'lucide-react'
 import { useThemeStore } from '@/stores/themeStore'
 import { cn } from '@/utils/cn'
+import { useHydrated } from '@/hooks/useHydrated'
 
 export function ThemeToggle({ className }) {
-  const { theme, setTheme } = useThemeStore()
+  const { theme: storedTheme, setTheme } = useThemeStore()
+  const theme = useHydrated() ? storedTheme : 'light' // matches pre-rendered HTML until hydrated
   const next = theme === 'dark' ? 'light' : 'dark'
   const Icon = theme === 'dark' ? Moon : Sun
 

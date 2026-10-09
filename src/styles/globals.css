@@ -71,6 +71,47 @@
             mask: radial-gradient(var(--hole) at 50% calc(100% + 1px), #0000 98%, #000) 50% / calc(var(--hole) * 3) 100% repeat-x;
   }
 
+  /*
+   * Border beam (concept adapted from Magic UI "Border Beam", magicui.design):
+   * a conic highlight rotating behind a 1.5px gap. Rotation = transform only.
+   */
+  .border-beam { position: relative; isolation: isolate; overflow: hidden; }
+  .border-beam::before {
+    content: '';
+    position: absolute;
+    inset: -60%;
+    z-index: -2;
+    background: conic-gradient(from 0deg, transparent 0 300deg, var(--fresh) 330deg, var(--accent) 350deg, transparent 360deg);
+    animation: var(--animate-beam);
+  }
+  .border-beam::after {
+    content: '';
+    position: absolute;
+    inset: 1.5px;
+    z-index: -1;
+    border-radius: calc(var(--radius-card) - 1.5px);
+    background: var(--surface);
+  }
+
+  /* Cursor spotlight for bento tiles: --mx/--my set from pointer position */
+  .spotlight { position: relative; }
+  .spotlight::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), color-mix(in oklab, var(--fresh) 16%, transparent), transparent 60%);
+  }
+  .spotlight:hover::before { opacity: 1; }
+
+  .dot-grid {
+    background-image: radial-gradient(var(--line-strong) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
 }

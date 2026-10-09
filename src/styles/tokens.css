@@ -50,6 +50,8 @@
   --focus-ring: 0 0 0 3px var(--bg), 0 0 0 5px var(--brand);
 
   --grain-opacity: 0.05;
+  --panel-deep: #0e3b20;          /* fixed deep-forest panel used in both themes */
+  --panel-deep-ink: #f0fdf4;
   color-scheme: light;
 }
 
@@ -116,6 +118,8 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
+  --color-panel-deep: var(--panel-deep);
+  --color-panel-deep-ink: var(--panel-deep-ink);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
   --color-warning: var(--warning);
@@ -156,6 +160,12 @@
   --animate-sheet-out: sheet-out 0.2s var(--ease-in-soft);
   --animate-sheet-up: sheet-up 0.32s var(--ease-out-soft);
   --animate-sheet-down: sheet-down 0.2s var(--ease-in-soft);
+  --animate-rise: rise 0.8s var(--ease-out-soft) both;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-beam: beam-spin 5s linear infinite;
+  --animate-accordion-down: accordion-down 0.28s var(--ease-out-soft);
+  --animate-accordion-up: accordion-up 0.2s var(--ease-in-soft);
+  --animate-scan: scan 2.4s ease-in-out infinite;
 
   @keyframes shimmer {
     from { transform: translateX(-100%); }
@@ -186,6 +196,15 @@
   @keyframes sheet-out { from { transform: translateX(0); } to { transform: translateX(100%); } }
   @keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
   @keyframes sheet-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
+  @keyframes rise { from { transform: translateY(105%); } to { transform: translateY(0); } }
+  @keyframes float {
+    0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--r, 0deg)); }
+    50% { transform: translate3d(0, -10px, 0) rotate(calc(var(--r, 0deg) + 3deg)); }
+  }
+  @keyframes beam-spin { to { transform: rotate(360deg); } }
+  @keyframes accordion-down { from { height: 0; } to { height: var(--radix-accordion-content-height); } }
+  @keyframes accordion-up { from { height: var(--radix-accordion-content-height); } to { height: 0; } }
+  @keyframes scan { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(var(--scan-distance, 100px)); } }
 }
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));

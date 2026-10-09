@@ -1,11 +1,24 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { LazyMotion, MotionConfig } from 'motion/react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { SmoothScroll } from '@/components/layout/SmoothScroll'
 import { CustomCursor } from '@/components/layout/CustomCursor'
-import { Toaster } from '@/components/ui/Toaster'
 import { useAuthStore } from '@/stores/authStore'
 import { authService } from '@/services/authService'
+import { whenIdle } from '@/utils/idle'
+
+// Toast UI isn't needed for first paint; mount it once the browser is idle.
+const Toaster = lazy(() => import('@/components/ui/Toaster').then((mod) => ({ default: mod.Toaster })))
+
+function DeferredToaster() {
+  const [ready, setReady] = useState(false)
+  useEffect(() => whenIdle(() => setReady(true)), [])
+  return ready ? (
+    <Suspense fallback={null}>
+      <Toaster />
+    </Suspense>
+  ) : null
+}
 
 const loadMotionFeatures = () => import('@/utils/motionFeatures').then((mod) => mod.default)
 
@@ -41,7 +54,7 @@ export function Providers({ children }) {
         <SmoothScroll>
           <SessionCheck />
           {children}
-          <Toaster />
+          <DeferredToaster />
           <CustomCursor />
         </SmoothScroll>
       </MotionConfig>

@@ -22,6 +22,9 @@ export function SmoothScroll({ children }) {
   return <LenisContext.Provider value={lenis}>{children}</LenisContext.Provider>
 }
 
+/** The active Lenis instance, or null when native scrolling is in use. */
+export const useLenis = () => useContext(LenisContext)
+
 /** Scroll helper that uses Lenis when active, native scrolling otherwise. */
 export function useScrollTo() {
   const lenis = useContext(LenisContext)
