@@ -27,3 +27,14 @@ export function RunnerLayout() {
     </>
   )
 }
+
+export function AdminLayout() {
+  return (
+    <>
+      <AppHeader variant="admin" />
+      <main id="main" className="pb-10">
+        <PageTransition />
+      </main>
+    </>
+  )
+}

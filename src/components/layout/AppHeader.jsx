@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router'
 import { DropdownMenu } from 'radix-ui'
-import { LogOut, MapPin, ShoppingBag, UserRound } from 'lucide-react'
+import { Bike, LogOut, MapPin, ShieldCheck, ShoppingBag, UserRound } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/stores/authStore'
@@ -8,13 +8,14 @@ import { useCartStore, selectCartCount } from '@/stores/cartStore'
 import { useLocationName } from '@/hooks/useLocations'
 import { ThemeToggle } from './ThemeToggle'
 import { CountBadge } from './CountBadge'
+import { hasPermission, PERMISSIONS, ROLE_LABEL, ROLES } from '@/utils/permissions'
 
-/** Header for signed-in areas. `variant="runner"` hides customer-only controls. */
+/** Header for signed-in areas. `variant` = customer | runner | admin; non-customer variants hide shopping controls. */
 export function AppHeader({ variant = 'customer' }) {
   const user = useAuthStore((s) => s.user)
   const cartCount = useCartStore(selectCartCount)
   const locationName = useLocationName(user?.defaultLocationId)
-  const home = variant === 'runner' ? '/runner' : '/app'
+  const home = { customer: '/app', runner: '/runner', admin: '/admin' }[variant]
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-xl">
@@ -26,6 +27,10 @@ export function AppHeader({ variant = 'customer' }) {
 
         {variant === 'runner' ? (
           <Badge tone="brand" size="md">Runner</Badge>
+        ) : variant === 'admin' ? (
+          <Badge tone="info" size="md">
+            {ROLE_LABEL[user?.roles.includes(ROLES.SUPER_ADMIN) ? ROLES.SUPER_ADMIN : ROLES.ADMIN]}
+          </Badge>
         ) : (
           <div className="min-w-0 flex-1 sm:flex-none">
             <p className="text-[11px] font-medium uppercase tracking-wider text-ink-subtle">Deliver to</p>
@@ -54,6 +59,12 @@ export function AppHeader({ variant = 'customer' }) {
     </header>
   )
 }
+
+const AREA_LINKS = [
+  { variant: 'customer', to: '/app', label: 'Shop', icon: ShoppingBag, permission: PERMISSIONS.SHOP },
+  { variant: 'runner', to: '/runner', label: 'Runner mode', icon: Bike, permission: PERMISSIONS.RUNNER_DELIVER },
+  { variant: 'admin', to: '/admin', label: 'Admin console', icon: ShieldCheck, permission: PERMISSIONS.ADMIN_ACCESS },
+]
 
 function AccountMenu({ user, variant }) {
   const logout = useAuthStore((s) => s.logout)
@@ -86,17 +97,13 @@ function AccountMenu({ user, variant }) {
               </Link>
             </DropdownMenu.Item>
           )}
-          {user?.roles.includes('runner') && (
-            <DropdownMenu.Item asChild>
-              <Link
-                to={variant === 'runner' ? '/app' : '/runner'}
-                className="flex h-10 items-center gap-2.5 rounded-tile px-3 text-sm outline-none data-[highlighted]:bg-surface-2"
-              >
-                <ShoppingBag className="size-4" aria-hidden="true" />
-                {variant === 'runner' ? 'Switch to shopping' : 'Switch to runner mode'}
+          {AREA_LINKS.filter((a) => a.variant !== variant && hasPermission(user, a.permission)).map(({ to, label, icon: Icon }) => (
+            <DropdownMenu.Item key={to} asChild>
+              <Link to={to} className="flex h-10 items-center gap-2.5 rounded-tile px-3 text-sm outline-none data-[highlighted]:bg-surface-2">
+                <Icon className="size-4" aria-hidden="true" /> {label}
               </Link>
             </DropdownMenu.Item>
-          )}
+          ))}
           <DropdownMenu.Item
             onSelect={async () => {
               await logout()

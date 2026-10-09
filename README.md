@@ -17,7 +17,8 @@ npm run build                # production build in dist/
 Useful routes while building:
 - `/` — the landing page. In Phase 1 this is a shell; the full page comes in Phase 2.
 - `/styleguide` — design tokens, components, the delivery-fee lab and an access-rules tester. It is internal and not linked from the site.
-- `/login` — sign in with a sample customer or a sample approved runner (mock backend only).
+- `/login` — sign in with a sample customer, a sample approved runner or a sample super admin (mock backend only).
+- `/admin` — admin console (people & roles), for admins and super admins.
 
 ## Tech stack
 
@@ -72,7 +73,16 @@ Components never call the backend directly. They call `services/*`, which go thr
   - The fee is calculated from the unrounded distance, and the server is authoritative.
 - **Snapshots:** each order stores its fee, distance, distance method and pricing version.
 - **Fee split:** the runner payout is separate from the customer fee. Only the ₹10 → ₹8 example exists so far; the other payouts are undecided (`null`).
-- **Roles:** customer and runner routes have separate checks. Runner access needs an assigned role **and** approval, and it is never chosen at sign-up. All route guards are UX only; the server authorises every call.
+- **Roles and permissions** are defined in `src/utils/permissions.js` and shared by the UI and the server. The server enforces them; route guards are UX only.
+
+  | Role | Can |
+  |---|---|
+  | Customer | Shop and see their own orders. Every sign-up gets this role |
+  | Runner | Deliver orders, but only once `runnerStatus` is `approved` |
+  | Admin | Open the admin console, view users, approve or suspend runners, view all orders |
+  | Super admin | Everything, including assigning or removing any role (admin and super admin too) and managing pricing |
+
+  Nobody can choose a role at sign-up. A super admin can't remove their own super admin role, and the last super admin can't be removed.
 - **Secrets:** none are in client code. Only `VITE_*` public values are read (see `.env.example`).
 
 ## Open decisions

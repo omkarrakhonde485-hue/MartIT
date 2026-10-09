@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogTrigger, SheetContent, DialogClose } from '@/components/ui/Dialog'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/utils/cn'
+import { homePathFor } from '@/utils/permissions'
 import { ThemeToggle } from './ThemeToggle'
 
 export const MARKETING_LINKS = [
@@ -23,7 +24,7 @@ export function MarketingNavbar() {
   const [scrolled, setScrolled] = useState(false)
   useMotionValueEvent(scrollY, 'change', (y) => setScrolled(y > 24))
   const user = useAuthStore((s) => s.user)
-  const appHref = user?.roles.includes('runner') ? '/runner' : '/app'
+  const appHref = user ? homePathFor(user) : '/app'
 
   return (
     <header className="sticky top-0 z-40 px-4 pt-3 md:px-6">

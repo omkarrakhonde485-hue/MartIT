@@ -11,6 +11,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 // Signed-in areas and the dev styleguide are code-split so the landing page stays light.
 const CustomerLayout = lazy(() => import('./appLayouts').then((m) => ({ default: m.CustomerLayout })))
 const RunnerLayout = lazy(() => import('./appLayouts').then((m) => ({ default: m.RunnerLayout })))
+const AdminLayout = lazy(() => import('./appLayouts').then((m) => ({ default: m.AdminLayout })))
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
 const SignupPage = lazy(() => import('@/pages/auth/SignupPage'))
 const CustomerHomePage = lazy(() => import('@/pages/customer/HomePage'))
@@ -18,6 +19,7 @@ const CartPage = lazy(() => import('@/pages/customer/CartPage'))
 const OrdersPage = lazy(() => import('@/pages/customer/OrdersPage'))
 const ProfilePage = lazy(() => import('@/pages/customer/ProfilePage'))
 const RunnerDashboardPage = lazy(() => import('@/pages/runner/RunnerDashboardPage'))
+const AdminConsolePage = lazy(() => import('@/pages/admin/AdminConsolePage'))
 const StyleguidePage = lazy(() => import('@/pages/dev/StyleguidePage'))
 
 function Root() {
@@ -74,6 +76,11 @@ export const router = createBrowserRouter([
         path: 'runner',
         element: <RequireRole role="runner" />,
         children: [{ element: <RunnerLayout />, children: [{ index: true, element: <RunnerDashboardPage /> }] }],
+      },
+      {
+        path: 'admin',
+        element: <RequireRole role="admin" />,
+        children: [{ element: <AdminLayout />, children: [{ index: true, element: <AdminConsolePage /> }] }],
       },
     ],
   },

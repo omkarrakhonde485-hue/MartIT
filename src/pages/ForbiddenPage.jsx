@@ -8,7 +8,7 @@ const COPY = {
     title: 'Runner access is by approval',
     body: "Runner accounts are assigned by the MartIT team after verification. You can't choose this role at sign-up. If you've applied, we'll let you know once you're approved.",
   },
-  admin: { title: 'Admins only', body: 'This area is for the MartIT team.' },
+  admin: { title: 'Admins only', body: 'The admin console is for the MartIT team. Admin access is granted by a super admin.' },
   customer: { title: 'Not available for this account', body: 'This area needs a customer account.' },
 }
 

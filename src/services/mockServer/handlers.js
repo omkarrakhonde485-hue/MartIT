@@ -10,6 +10,7 @@ import { PAYMENT_STATUS } from '@/utils/paymentMachine'
 import { createDb } from './db'
 import { ApiError } from './errors'
 import { getDistanceKm } from './routing'
+import { PERMISSIONS, ROLES, hasPermission } from '@/utils/permissions'
 
 const publicUser = (u) => ({
   id: u.id,
@@ -30,6 +31,18 @@ export function createMockServer({ routingProvider = null } = {}) {
     const user = userId && db.users.find((u) => u.id === userId)
     if (!user) throw new ApiError('UNAUTHENTICATED', 'Please log in again.', 401)
     return user
+  }
+
+  function requirePermission(token, permission) {
+    const user = requireUser(token)
+    if (!hasPermission(user, permission)) throw new ApiError('FORBIDDEN', "You don't have access to do that.", 403)
+    return user
+  }
+
+  const findUser = (id) => {
+    const u = db.users.find((x) => x.id === id)
+    if (!u) throw new ApiError('USER_NOT_FOUND', 'User not found.', 404)
+    return u
   }
 
   async function computeDeliveryQuote(storeId, locationId) {
@@ -62,7 +75,7 @@ export function createMockServer({ routingProvider = null } = {}) {
   const handlers = {
     // ---- auth (demo only) -------------------------------------------------
     'auth.demoLogin': ({ role }) => {
-      const user = db.users.find((u) => (role === 'runner' ? u.roles.includes('runner') : !u.roles.includes('runner')))
+      const user = db.users.find((u) => u.demoKey === role)
       if (!user) throw new ApiError('NO_DEMO_USER', 'No sample account for that role.', 404)
       const token = newId('tok')
       db.sessions.set(token, user.id)
@@ -73,6 +86,38 @@ export function createMockServer({ routingProvider = null } = {}) {
       return { ok: true }
     },
     'auth.me': (_payload, { token }) => publicUser(requireUser(token)),
+
+    // ---- admin --------------------------------------------------------------
+    'admin.users.list': (_payload, { token }) => {
+      requirePermission(token, PERMISSIONS.USERS_READ)
+      return db.users.map(publicUser)
+    },
+
+    /** Approve or suspend a runner applicant. Approval grants the runner role. */
+    'admin.runners.setStatus': ({ userId, status }, { token }) => {
+      requirePermission(token, PERMISSIONS.RUNNERS_APPROVE)
+      if (!['approved', 'suspended'].includes(status)) throw new ApiError('INVALID_STATUS', 'Invalid runner status.', 422)
+      const target = findUser(userId)
+      if (target.runnerStatus == null) throw new ApiError('NOT_AN_APPLICANT', 'This user has not applied to be a runner.', 409)
+      target.runnerStatus = status
+      if (status === 'approved' && !target.roles.includes(ROLES.RUNNER)) target.roles.push(ROLES.RUNNER)
+      return publicUser(target)
+    },
+
+    /** Grant or revoke a role. Only `roles.assign` (super admin) may do this. */
+    'admin.roles.set': ({ userId, role, granted }, { token }) => {
+      const actor = requirePermission(token, PERMISSIONS.ROLES_ASSIGN)
+      if (!Object.values(ROLES).includes(role)) throw new ApiError('INVALID_ROLE', 'Unknown role.', 422)
+      const target = findUser(userId)
+      if (!granted && role === ROLES.SUPER_ADMIN) {
+        if (target.id === actor.id) throw new ApiError('SELF_DEMOTION', "You can't remove your own super admin role.", 409)
+        const remaining = db.users.filter((u) => u.roles.includes(ROLES.SUPER_ADMIN) && u.id !== target.id)
+        if (remaining.length === 0) throw new ApiError('LAST_SUPER_ADMIN', 'There must always be at least one super admin.', 409)
+      }
+      if (role === ROLES.RUNNER && granted) target.runnerStatus = 'approved'
+      target.roles = granted ? [...new Set([...target.roles, role])] : target.roles.filter((r) => r !== role)
+      return publicUser(target)
+    },
 
     // ---- locations ----------------------------------------------------------
     'locations.list': () => db.locations.map(({ id, name, group }) => ({ id, name, group })),
@@ -88,7 +133,7 @@ export function createMockServer({ routingProvider = null } = {}) {
      * later price/fee changes never alter this order.
      */
     'orders.create': async ({ storeId, locationId, lines }, { token }) => {
-      const user = requireUser(token)
+      const user = requirePermission(token, PERMISSIONS.SHOP)
       if (!Array.isArray(lines) || lines.length === 0) {
         throw new ApiError('EMPTY_CART', 'Your cart is empty.', 422)
       }

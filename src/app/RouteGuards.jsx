@@ -1,20 +1,21 @@
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { useAuthStore } from '@/stores/authStore'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
+import { hasPermission, homePathFor, PERMISSIONS } from '@/utils/permissions'
 
 /**
  * Client-side route gating for UX only. Every API call is independently authorised
  * by the server; hiding a route is never the security boundary.
  *
- * Each area has its own check:
- *  - customer: signed in with the 'customer' role
- *  - runner:   'runner' role assigned by an admin AND runnerStatus === 'approved'
- *  - admin:    reserved for a future phase
+ * Each area has its own check (see utils/permissions.js):
+ *  - customer: 'shop'
+ *  - runner:   'runner.deliver' — runner role assigned by an admin AND approved
+ *  - admin:    'admin.access'   — admin or super admin
  */
-const CHECKS = {
-  customer: (u) => u.roles.includes('customer'),
-  runner: (u) => u.roles.includes('runner') && u.runnerStatus === 'approved',
-  admin: (u) => u.roles.includes('admin'),
+const AREA_PERMISSION = {
+  customer: PERMISSIONS.SHOP,
+  runner: PERMISSIONS.RUNNER_DELIVER,
+  admin: PERMISSIONS.ADMIN_ACCESS,
 }
 
 export function RequireRole({ role }) {
@@ -25,13 +26,13 @@ export function RequireRole({ role }) {
     const next = encodeURIComponent(location.pathname + location.search)
     return <Navigate to={`/login?next=${next}`} replace />
   }
-  if (!CHECKS[role]?.(user)) return <ForbiddenPage role={role} />
+  if (!hasPermission(user, AREA_PERMISSION[role])) return <ForbiddenPage role={role} />
   return <Outlet />
 }
 
 /** Sends signed-in users away from login/signup to their home area. */
 export function RedirectIfAuthed() {
   const user = useAuthStore((s) => s.user)
-  if (user) return <Navigate to={user.roles.includes('runner') && user.runnerStatus === 'approved' ? '/runner' : '/app'} replace />
+  if (user) return <Navigate to={homePathFor(user)} replace />
   return <Outlet />
 }

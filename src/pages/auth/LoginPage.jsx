@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
-import { Bike, ShoppingBasket } from 'lucide-react'
+import { Bike, ShieldCheck, ShoppingBasket } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Spinner } from '@/components/ui/Spinner'
 import { toast } from '@/components/ui/Toaster'
 import { useAuthStore } from '@/stores/authStore'
 import { isMockBackend } from '@/config/env'
+import { homePathFor } from '@/utils/permissions'
 
 /** Only allow same-site relative redirects (prevents open-redirects via ?next=). */
 function safeNext(next) {
@@ -28,7 +29,7 @@ export default function LoginPage() {
     try {
       const user = await demoLogin(role)
       toast.success(`Signed in as ${user.name}`)
-      navigate(safeNext(params.get('next')) ?? (role === 'runner' ? '/runner' : '/app'), { replace: true })
+      navigate(safeNext(params.get('next')) ?? homePathFor(user), { replace: true })
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -39,6 +40,7 @@ export default function LoginPage() {
   const options = [
     { role: 'customer', icon: ShoppingBasket, title: 'Sample customer', body: 'Browse, order and track.' },
     { role: 'runner', icon: Bike, title: 'Sample runner (approved)', body: 'Accept and deliver orders.' },
+    { role: 'super_admin', icon: ShieldCheck, title: 'Sample super admin', body: 'Approve runners and manage roles.' },
   ]
 
   return (
