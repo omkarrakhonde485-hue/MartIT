@@ -17,9 +17,9 @@ export const RESERVATION_STATUS = Object.freeze({
  * In-memory Dynamic Platform Fee Allocator (Mock Server).
  *
  * Confirmed Platform-Fee Rules:
- * 1. Range: ₹0.10 through ₹0.99 inclusive (10 to 99 paise).
+ * 1. Range: ₹0.01 through ₹0.99 inclusive (1 to 99 paise).
  * 2. Order: Smallest currently available eligible fee allocated first.
- * 3. Exact representation: Integer paise (10-99) prevents JavaScript floating-point uniqueness bugs.
+ * 3. Exact representation: Integer paise (1-99) prevents JavaScript floating-point uniqueness bugs.
  * 4. Verification window: 2 minutes (120,000 ms).
  * 5. Cooldown: 5 minutes (300,000 ms), beginning AFTER the 2-minute verification window expires.
  * 6. Total hold time: 7 minutes (420,000 ms) before an unverified fee becomes reusable.
@@ -70,7 +70,7 @@ export function createPlatformFeeAllocator({
         const reservation = {
           id: `fee_${p}_${allocatedAt}`,
           feePaise: p,
-          feeRupees: p / 100, // Exact decimal representation (0.10 - 0.99)
+          feeRupees: p / 100, // Exact decimal representation (0.01 - 0.99)
           orderId,
           attemptId: attemptId || orderId,
           allocatedAt,

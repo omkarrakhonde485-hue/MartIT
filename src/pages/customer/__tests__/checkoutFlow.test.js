@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { useCartStore, selectCartStoreId, selectCartCount } from '@/stores/cartStore'
 import { createMockServer } from '@/services/mockServer/handlers'
 import { calculateOrderTotals } from '@/utils/orderTotals'
+import React from 'react'
+import { renderToString } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { OrderConfirmationView } from '@/components/cart/OrderConfirmationView'
 import { SAMPLE_PRODUCTS } from '@/mocks/catalogue'
 import { SAMPLE_STORES } from '@/mocks/campus'
 
@@ -127,13 +132,15 @@ describe('Order Creation & Authoritative Pricing Lifecycle', () => {
     // Server-authoritative calculation:
     // Milk: 28 * 2 = 56, Bread: 45 * 1 = 45 => subtotal 101
     // loc_hostel_b distance is ~0.8 km => fee is 15
-    // Platform fee (smallest available 10 paise) => 0.10
-    // Total is 116.10
+    // Base amount: 101 + 15 = 116
+    // Platform fee (smallest available 1 paisa) => 0.01
+    // Total is 116.01
     expect(order.pricing).toEqual({
       itemSubtotal: 101,
       deliveryFee: 15,
-      platformFee: 0.1,
-      total: 116.1,
+      baseAmount: 116,
+      platformFee: 0.01,
+      total: 116.01,
       distanceKm: expect.any(Number),
       distanceMethod: 'straight_line',
       pricingVersion: '2026-10-09.1',
@@ -273,3 +280,72 @@ describe('Order Creation & Authoritative Pricing Lifecycle', () => {
     expect(useCartStore.getState().storeId).toBeNull()
   })
 })
+
+describe('Checkout & Order Confirmation Presentation Safeguards', () => {
+  it('formats distance strictly with two decimal places in OrderConfirmationView and labels correctly', () => {
+    const mockOrderStraightLine = {
+      id: 'ord_test_1',
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [{ productId: 'p_milk_500', name: 'Milk', pack: '500 ml', unitPrice: 28, quantity: 2 }],
+      pricing: {
+        itemSubtotal: 56,
+        deliveryFee: 15,
+        baseAmount: 71,
+        platformFee: 0.01,
+        total: 71.01,
+        distanceKm: 0.8006045776813487,
+        distanceMethod: 'straight_line',
+        pricingVersion: '2026-10-09.1',
+      },
+    }
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    const renderWithProviders = (order) =>
+      renderToString(
+        React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          React.createElement(
+            MemoryRouter,
+            null,
+            React.createElement(OrderConfirmationView, { order }),
+          ),
+        ),
+      )
+
+    const htmlStraight = renderWithProviders(mockOrderStraightLine)
+
+    // Formatted distance to 2 decimals
+    expect(htmlStraight).toContain('0.80 km straight-line distance')
+    expect(htmlStraight).not.toContain('0.8006')
+
+    // Authoritative fee and final total
+    expect(htmlStraight).toContain('Platform Fee')
+    expect(htmlStraight).toContain('₹0.01')
+    expect(htmlStraight).toContain('₹71.01')
+
+    // No internal allocation or routing details exposed
+    expect(htmlStraight).not.toContain('Dynamic payment routing')
+    expect(htmlStraight).not.toContain('Dynamic verification code')
+    expect(htmlStraight).not.toContain('₹0.01–₹0.99')
+    expect(htmlStraight).not.toContain('₹0.10–₹0.99')
+
+    // Test route distance method does NOT label as straight-line
+    const mockOrderRoute = {
+      ...mockOrderStraightLine,
+      pricing: {
+        ...mockOrderStraightLine.pricing,
+        distanceKm: 1.001,
+        distanceMethod: 'route',
+      },
+    }
+    const htmlRoute = renderWithProviders(mockOrderRoute)
+    expect(htmlRoute).toContain('1.00 km route distance')
+    expect(htmlRoute).not.toContain('straight-line')
+  })
+})
+

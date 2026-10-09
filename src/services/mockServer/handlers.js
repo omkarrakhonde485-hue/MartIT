@@ -161,7 +161,7 @@ export function createMockServer({ routingProvider = null } = {}) {
       const quote = await computeDeliveryQuote(storeId, locationId)
 
       const orderId = newId('ord')
-      // Allocate unique dynamic platform fee (10 paise - 99 paise)
+      // Allocate unique dynamic platform fee (1 paisa - 99 paise)
       const feeAllocation = db.feeAllocator.allocate({ orderId })
       const platformFee = feeAllocation.feeRupees
 
@@ -181,6 +181,7 @@ export function createMockServer({ routingProvider = null } = {}) {
         pricing: {
           itemSubtotal: totals.itemSubtotal,
           deliveryFee: totals.deliveryFee,
+          baseAmount: totals.baseAmount,
           platformFee: totals.platformFee,
           total: totals.total,
           distanceKm: quote.distanceKm,

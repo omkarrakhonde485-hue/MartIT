@@ -30,3 +30,10 @@ export function formatDistance(km) {
   if (km < 1) return `${Math.round(km * 1000)} m`
   return `${km.toFixed(km < 10 ? 2 : 1)} km`
 }
+
+/** Formats distance in km to exactly two decimal places for UI display (e.g., "0.80"). */
+export function formatDistanceKm(km) {
+  if (typeof km !== 'number' || !Number.isFinite(km)) return '0.00'
+  return km.toFixed(2)
+}
+

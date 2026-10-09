@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Price } from '@/components/ui/Price'
 import { formatINR } from '@/utils/currency'
+import { formatDistanceKm } from '@/utils/distance'
 import { SAMPLE_PRODUCTS } from '@/mocks/catalogue'
 import { cn } from '@/utils/cn'
 
@@ -85,6 +86,11 @@ export default function CartPage() {
       return sum + price * line.quantity
     }, 0)
   }, [cartItemsWithProduct])
+
+  // Estimated base amount before checkout platform fee
+  const estimatedBaseAmount = useMemo(() => {
+    return Math.round(itemSubtotal + (quote?.deliveryFee ?? 0))
+  }, [itemSubtotal, quote?.deliveryFee])
 
   // Validation checks
   const hasUnavailableItems = cartItemsWithProduct.some(({ product }) => !product)
@@ -330,7 +336,7 @@ export default function CartPage() {
                   </div>
                   <p className="text-[11px] text-ink-muted">
                     {isOutOfDeliveryArea
-                      ? `This location is outside our 5 km service area (${quoteError?.distanceKm} km straight-line distance). Checkout blocked.`
+                      ? `This location is outside our 5 km service area (${formatDistanceKm(quoteError?.distanceKm)} km straight-line distance). Checkout blocked.`
                       : quoteError?.message || 'Unable to quote for this location.'}
                   </p>
                 </div>
@@ -339,7 +345,7 @@ export default function CartPage() {
                   <div className="flex justify-between items-center">
                     <span className="text-ink-muted">Distance:</span>
                     <span className="font-semibold tabular">
-                      {quote.distanceKm} km straight-line distance
+                      {`${formatDistanceKm(quote.distanceKm)} km ${quote.distanceMethod === 'straight_line' ? 'straight-line distance' : 'route distance'}`}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -364,7 +370,7 @@ export default function CartPage() {
                   <span>Delivery Fee</span>
                   {quote && (
                     <span className="text-[11px] text-ink-subtle block">
-                      ({quote.distanceKm} km straight-line)
+                      {`(${formatDistanceKm(quote.distanceKm)} km ${quote.distanceMethod === 'straight_line' ? 'straight-line distance' : 'route distance'})`}
                     </span>
                   )}
                 </div>
@@ -373,30 +379,18 @@ export default function CartPage() {
                 </span>
               </div>
 
-              <div className="flex justify-between text-ink-muted">
-                <div>
-                  <span>Platform Fee</span>
-                  <span className="text-[11px] text-ink-subtle block">
-                    Dynamic payment routing
-                  </span>
-                </div>
-                <span className="tabular font-medium text-ink">
-                  ₹0.10 – ₹0.99
-                </span>
-              </div>
-
               {/* Total Row */}
               <div className="flex justify-between items-baseline pt-2 border-t border-line font-bold text-base text-ink">
-                <span>Estimated Subtotal + Delivery</span>
+                <span>Estimated Total</span>
                 <Price
-                  amount={itemSubtotal + (quote?.deliveryFee ?? 0)}
+                  amount={estimatedBaseAmount}
                   size="lg"
                   className="text-brand"
                 />
               </div>
 
               <p className="text-[11px] text-ink-subtle pt-1">
-                Prices and fees are estimates. The final authoritative total includes the unique platform verification fee assigned upon checkout.
+                Estimated base total. The final amount includes a small platform fee assigned at checkout.
               </p>
             </div>
 
@@ -430,7 +424,7 @@ export default function CartPage() {
                 ? 'Store is Closed'
                 : isOutOfDeliveryArea
                 ? 'Outside Delivery Radius'
-                : `Place Order • ${formatINR(itemSubtotal + (quote?.deliveryFee ?? 0))}`}
+                : `Place Order • ${formatINR(estimatedBaseAmount)}`}
             </Button>
 
             <p className="text-[11px] text-center text-ink-subtle">

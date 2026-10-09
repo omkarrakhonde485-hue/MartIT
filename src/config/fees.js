@@ -40,9 +40,9 @@ export const PLATFORM_FEE = null
 /**
  * Dynamic platform fee configuration (Pre-Milestone 3).
  * Decimal fee assigned uniquely per payment attempt to correlate UPI transactions.
- * Ranges from ₹0.10 to ₹0.99 (10 to 99 paise).
+ * Ranges from ₹0.01 to ₹0.99 (1 to 99 paise).
  */
-export const PLATFORM_FEE_MIN_PAISE = 10
+export const PLATFORM_FEE_MIN_PAISE = 1
 export const PLATFORM_FEE_MAX_PAISE = 99
 export const PLATFORM_FEE_WINDOW_MS = 2 * 60 * 1000 // 2-minute verification window
 export const PLATFORM_FEE_COOLDOWN_MS = 5 * 60 * 1000 // 5-minute cooldown after window expiry

@@ -20,13 +20,23 @@ export function calculateOrderTotals({ lines, deliveryFee, platformFee }) {
     if (!Number.isInteger(line.quantity) || line.quantity < 1) throw new Error('Invalid quantity')
     if (typeof line.unitPrice !== 'number' || !(line.unitPrice >= 0)) throw new Error('Invalid unit price')
   }
-  const pFee = hasPlatformFee ? platformFee : 0
   const itemSubtotal = sumRupees(lines.map((l) => l.unitPrice * l.quantity))
+  const baseAmount = Math.round(itemSubtotal + deliveryFee)
+
+  if (hasPlatformFee) {
+    return {
+      itemSubtotal,
+      deliveryFee,
+      baseAmount,
+      platformFee,
+      total: sumRupees([baseAmount, platformFee]),
+    }
+  }
+
   return {
     itemSubtotal,
     deliveryFee,
-    ...(hasPlatformFee ? { platformFee: pFee } : {}),
-    total: sumRupees([itemSubtotal, deliveryFee, pFee]),
+    total: sumRupees([itemSubtotal, deliveryFee]),
   }
 }
 

@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Price } from '@/components/ui/Price'
 import { formatINR } from '@/utils/currency'
+import { formatDistanceKm } from '@/utils/distance'
 import { SAMPLE_STORES } from '@/mocks/campus'
 import { useLocations } from '@/hooks/useLocations'
 
@@ -20,7 +21,9 @@ export function OrderConfirmationView({ order, onStartNew }) {
   const distanceMethodLabel =
     order.pricing?.distanceMethod === 'straight_line'
       ? 'straight-line distance'
-      : order.pricing?.distanceMethod || 'distance'
+      : order.pricing?.distanceMethod === 'route'
+      ? 'route distance'
+      : 'distance'
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 md:py-12 space-y-6">
@@ -135,7 +138,7 @@ export function OrderConfirmationView({ order, onStartNew }) {
                 <span>Delivery Fee</span>
                 {order.pricing.distanceKm != null && (
                   <span className="text-xs text-ink-subtle block">
-                    ({order.pricing.distanceKm} km {distanceMethodLabel})
+                    {`(${formatDistanceKm(order.pricing.distanceKm)} km ${distanceMethodLabel})`}
                   </span>
                 )}
               </div>
@@ -146,12 +149,7 @@ export function OrderConfirmationView({ order, onStartNew }) {
 
             {order.pricing.platformFee != null && (
               <div className="flex justify-between text-ink-muted">
-                <div>
-                  <span>Platform Fee</span>
-                  <span className="text-xs text-ink-subtle block">
-                    Dynamic verification code
-                  </span>
-                </div>
+                <span>Platform Fee</span>
                 <span className="tabular font-medium text-ink">
                   {formatINR(order.pricing.platformFee)}
                 </span>

@@ -4,6 +4,7 @@ import { useDeliveryQuote } from '@/hooks/useDeliveryQuote'
 import { useLocationName } from '@/hooks/useLocations'
 import { useAuthStore } from '@/stores/authStore'
 import { formatINR } from '@/utils/currency'
+import { formatDistanceKm } from '@/utils/distance'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/utils/cn'
 
@@ -49,7 +50,7 @@ export function StoreHeader({
               <Zap className="size-3 text-accent shrink-0 fill-accent" />
               <span>{formatINR(quote.deliveryFee)} delivery</span>
               <span className="text-ink-subtle font-normal">
-                ({quote.distanceKm} km {quote.distanceMethod === 'straight_line' ? 'straight-line' : 'route'})
+                ({formatDistanceKm(quote.distanceKm)} km {quote.distanceMethod === 'straight_line' ? 'straight-line distance' : 'route distance'})
               </span>
             </span>
           ) : quoteError ? (

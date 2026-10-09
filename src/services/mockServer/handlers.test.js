@@ -47,7 +47,7 @@ describe('orders.create', () => {
       platformFee: 0,
       total: 1,
     })
-    expect(order.pricing).toMatchObject({ itemSubtotal: 56, deliveryFee: 15, platformFee: 0.1, total: 71.1 })
+    expect(order.pricing).toMatchObject({ itemSubtotal: 56, deliveryFee: 15, baseAmount: 71, platformFee: 0.01, total: 71.01 })
     expect(order.lines[0].unitPrice).toBe(28)
   })
 

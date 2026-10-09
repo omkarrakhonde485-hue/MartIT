@@ -7,6 +7,7 @@ import { createMockServer } from '../handlers'
 import { calculateOrderTotals } from '@/utils/orderTotals'
 import { splitDeliveryFee } from '@/utils/deliveryFee'
 import { formatINR } from '@/utils/currency'
+import { formatDistanceKm } from '@/utils/distance'
 
 describe('Dynamic Platform Fee Allocator Unit Tests', () => {
   let allocator
@@ -15,19 +16,19 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
     allocator = createPlatformFeeAllocator()
   })
 
-  it('allocates the smallest currently available eligible fee first (10 paise = ₹0.10)', () => {
+  it('allocates the smallest currently available eligible fee first (1 paisa = ₹0.01)', () => {
     const now = 1000000
     const first = allocator.allocate({ orderId: 'ord_1', now })
-    expect(first.feePaise).toBe(10)
-    expect(first.feeRupees).toBe(0.1)
+    expect(first.feePaise).toBe(1)
+    expect(first.feeRupees).toBe(0.01)
 
     const second = allocator.allocate({ orderId: 'ord_2', now })
-    expect(second.feePaise).toBe(11)
-    expect(second.feeRupees).toBe(0.11)
+    expect(second.feePaise).toBe(2)
+    expect(second.feeRupees).toBe(0.02)
 
     const third = allocator.allocate({ orderId: 'ord_3', now })
-    expect(third.feePaise).toBe(12)
-    expect(third.feeRupees).toBe(0.12)
+    expect(third.feePaise).toBe(3)
+    expect(third.feeRupees).toBe(0.03)
   })
 
   it('ensures simultaneous active reservations never receive the same fee', () => {
@@ -40,20 +41,21 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
     const paiseValues = allocations.map((a) => a.feePaise)
     const uniqueValues = new Set(paiseValues)
     expect(uniqueValues.size).toBe(15)
-    // Starts at 10 and increases sequentially
-    expect(paiseValues[0]).toBe(10)
-    expect(paiseValues[14]).toBe(24)
+    // Starts at 1 and increases sequentially
+    expect(paiseValues[0]).toBe(1)
+    expect(paiseValues[14]).toBe(15)
   })
 
-  it('allows all 90 eligible fees (10-99 paise) to be allocated and exhausts safely', () => {
+  it('allows all 99 eligible fees (1-99 paise) to be allocated and exhausts safely', () => {
     const now = 3000000
-    // Allocate all 90 slots
-    for (let i = 10; i <= 99; i++) {
+    // Allocate all 99 slots (1 to 99 paise)
+    for (let i = 1; i <= 99; i++) {
       const res = allocator.allocate({ orderId: `ord_${i}`, now })
       expect(res.feePaise).toBe(i)
+      expect(res.feeRupees).toBe(Number((i / 100).toFixed(2)))
     }
 
-    // The 91st allocation must fail safely
+    // The 100th allocation must fail safely
     expect(() => allocator.allocate({ orderId: 'ord_overflow', now })).toThrowError(
       /All dynamic payment fee slots are currently active/i,
     )
@@ -65,12 +67,12 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
 
     // 1 minute 59 seconds later (119,000 ms)
     const withinWindow = startTime + 119 * 1000
-    expect(allocator.getStatus(10, withinWindow)).toBe(RESERVATION_STATUS.ACTIVE)
-    expect(allocator.isAvailable(10, withinWindow)).toBe(false)
+    expect(allocator.getStatus(1, withinWindow)).toBe(RESERVATION_STATUS.ACTIVE)
+    expect(allocator.isAvailable(1, withinWindow)).toBe(false)
 
-    // Next allocation must NOT reuse 10 paise
+    // Next allocation must NOT reuse 1 paisa
     const second = allocator.allocate({ orderId: 'ord_2', now: withinWindow })
-    expect(second.feePaise).toBe(11)
+    expect(second.feePaise).toBe(2)
   })
 
   it('begins 5-minute cooldown after the 2-minute verification window expires', () => {
@@ -79,22 +81,22 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
 
     // Exactly after 2 minutes (120,001 ms)
     const justExpired = startTime + 120 * 1000 + 1
-    expect(allocator.getStatus(10, justExpired)).toBe(RESERVATION_STATUS.COOLDOWN)
-    expect(allocator.isAvailable(10, justExpired)).toBe(false)
+    expect(allocator.getStatus(1, justExpired)).toBe(RESERVATION_STATUS.COOLDOWN)
+    expect(allocator.isAvailable(1, justExpired)).toBe(false)
 
     // At 4 minutes from start (2 min window + 2 min into cooldown)
     const midCooldown = startTime + 240 * 1000
-    expect(allocator.getStatus(10, midCooldown)).toBe(RESERVATION_STATUS.COOLDOWN)
-    expect(allocator.isAvailable(10, midCooldown)).toBe(false)
+    expect(allocator.getStatus(1, midCooldown)).toBe(RESERVATION_STATUS.COOLDOWN)
+    expect(allocator.isAvailable(1, midCooldown)).toBe(false)
 
     // At 6 minutes 59 seconds (just before 5-minute cooldown completes)
     const almostDone = startTime + (2 * 60 + 5 * 60) * 1000 - 1000
-    expect(allocator.getStatus(10, almostDone)).toBe(RESERVATION_STATUS.COOLDOWN)
-    expect(allocator.isAvailable(10, almostDone)).toBe(false)
+    expect(allocator.getStatus(1, almostDone)).toBe(RESERVATION_STATUS.COOLDOWN)
+    expect(allocator.isAvailable(1, almostDone)).toBe(false)
 
-    // Next allocation during cooldown must skip 10 paise
+    // Next allocation during cooldown must skip 1 paisa
     const next = allocator.allocate({ orderId: 'ord_2', now: midCooldown })
-    expect(next.feePaise).toBe(11)
+    expect(next.feePaise).toBe(2)
   })
 
   it('re-enables the fee for reuse only after the full cooldown (7 minutes total)', () => {
@@ -103,12 +105,12 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
 
     // At exactly 7 minutes (420,000 ms)
     const cooldownComplete = startTime + 7 * 60 * 1000
-    expect(allocator.getStatus(10, cooldownComplete)).toBe(RESERVATION_STATUS.AVAILABLE)
-    expect(allocator.isAvailable(10, cooldownComplete)).toBe(true)
+    expect(allocator.getStatus(1, cooldownComplete)).toBe(RESERVATION_STATUS.AVAILABLE)
+    expect(allocator.isAvailable(1, cooldownComplete)).toBe(true)
 
-    // Next allocation now reuses the smallest available slot (10 paise)
+    // Next allocation now reuses the smallest available slot (1 paisa)
     const reused = allocator.allocate({ orderId: 'ord_reused', now: cooldownComplete })
-    expect(reused.feePaise).toBe(10)
+    expect(reused.feePaise).toBe(1)
     expect(reused.reservation.orderId).toBe('ord_reused')
   })
 
@@ -122,12 +124,12 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
 
     // Fast forward to 10 minutes later (past 7-minute hold)
     const longAfter = startTime + 10 * 60 * 1000
-    expect(allocator.getStatus(10, longAfter)).toBe(RESERVATION_STATUS.PAID)
-    expect(allocator.isAvailable(10, longAfter)).toBe(false)
+    expect(allocator.getStatus(1, longAfter)).toBe(RESERVATION_STATUS.PAID)
+    expect(allocator.isAvailable(1, longAfter)).toBe(false)
 
     // Next allocation must NOT reuse the paid fee
     const next = allocator.allocate({ orderId: 'ord_2', now: longAfter })
-    expect(next.feePaise).toBe(11)
+    expect(next.feePaise).toBe(2)
   })
 })
 
@@ -153,39 +155,64 @@ describe('Server Authoritative Orders Integration with Platform Fee', () => {
     // Authoritative calculation:
     // Milk: 28 * 2 = 56
     // Delivery: loc_hostel_b = 15
-    // Smallest platform fee: 0.10
-    // Authoritative total: 56 + 15 + 0.10 = 71.10
+    // Base amount: 56 + 15 = 71
+    // Smallest platform fee: 0.01 (1 paisa)
+    // Authoritative total: 71 + 0.01 = 71.01
     expect(order.pricing.itemSubtotal).toBe(56)
     expect(order.pricing.deliveryFee).toBe(15)
-    expect(order.pricing.platformFee).toBe(0.1)
-    expect(order.pricing.total).toBe(71.1)
+    expect(order.pricing.baseAmount).toBe(71)
+    expect(order.pricing.platformFee).toBe(0.01)
+    expect(order.pricing.total).toBe(71.01)
   })
 
-  it('computes exact order totals for the browser test case (item 97, delivery 15, fee 0.10 -> 112.10)', async () => {
-    // 2 x p_bread (45 each = 90) + not matching 97 directly, so let's check calculateOrderTotals directly
+  it('computes exact order totals with fractional base rounded before adding platform fee (₹97.40 + ₹15 -> ₹112 + ₹0.01 = ₹112.01)', () => {
+    // Test case from user requirements:
+    // Item subtotal: ₹97.40
+    // Delivery fee: ₹15.00
+    // Rounded base amount: ₹112.00
+    // Assigned platform fee: ₹0.01
+    // Final total: ₹112.01
     const totals = calculateOrderTotals({
       lines: [
-        { unitPrice: 97, quantity: 1 },
+        { unitPrice: 97.40, quantity: 1 },
       ],
       deliveryFee: 15,
-      platformFee: 0.1,
+      platformFee: 0.01,
     })
 
-    expect(totals.itemSubtotal).toBe(97)
+    expect(totals.itemSubtotal).toBe(97.40)
     expect(totals.deliveryFee).toBe(15)
-    expect(totals.platformFee).toBe(0.1)
-    expect(totals.total).toBe(112.1)
+    expect(totals.baseAmount).toBe(112)
+    expect(totals.platformFee).toBe(0.01)
+    expect(totals.total).toBe(112.01)
 
     // Currency formatting checks
-    expect(formatINR(totals.itemSubtotal)).toBe('₹97')
+    expect(formatINR(totals.itemSubtotal)).toBe('₹97.40')
     expect(formatINR(totals.deliveryFee)).toBe('₹15')
-    expect(formatINR(totals.platformFee)).toBe('₹0.10')
-    expect(formatINR(totals.total)).toBe('₹112.10')
+    expect(formatINR(totals.baseAmount)).toBe('₹112')
+    expect(formatINR(totals.platformFee)).toBe('₹0.01')
+    expect(formatINR(totals.total)).toBe('₹112.01')
+  })
+
+  it('preserves existing whole-rupee base amounts accurately', () => {
+    const totals = calculateOrderTotals({
+      lines: [
+        { unitPrice: 28, quantity: 2 },
+      ],
+      deliveryFee: 15,
+      platformFee: 0.01,
+    })
+
+    expect(totals.itemSubtotal).toBe(56)
+    expect(totals.deliveryFee).toBe(15)
+    expect(totals.baseAmount).toBe(71)
+    expect(totals.platformFee).toBe(0.01)
+    expect(totals.total).toBe(71.01)
   })
 
   it('fails safely and creates no order when platform fee allocation is exhausted', async () => {
-    // Fill all 90 slots directly in server's allocator
-    for (let p = 10; p <= 99; p++) {
+    // Fill all 99 slots directly in server's allocator
+    for (let p = 1; p <= 99; p++) {
       server.feeAllocator.allocate({ orderId: `dummy_${p}` })
     }
 
@@ -222,5 +249,18 @@ describe('Server Authoritative Orders Integration with Platform Fee', () => {
     const split10 = splitDeliveryFee(10)
     expect(split10.runnerPayout).toBe(8)
     expect(split10.platformShare).toBe(2)
+  })
+})
+
+describe('Display Formatting Regression Tests', () => {
+  it('formats distance strictly to two decimal places without altering unrounded distance value', () => {
+    const rawDistance = 0.8006045776813487
+    const formatted = formatDistanceKm(rawDistance)
+    expect(formatted).toBe('0.80')
+
+    expect(formatDistanceKm(1.5)).toBe('1.50')
+    expect(formatDistanceKm(0)).toBe('0.00')
+    expect(formatDistanceKm(null)).toBe('0.00')
+    expect(formatDistanceKm(undefined)).toBe('0.00')
   })
 })
