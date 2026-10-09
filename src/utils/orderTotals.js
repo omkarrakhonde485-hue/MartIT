@@ -24,12 +24,15 @@ export function calculateOrderTotals({ lines, deliveryFee, platformFee }) {
   const baseAmount = Math.round(itemSubtotal + deliveryFee)
 
   if (hasPlatformFee) {
+    const basePaise = Math.round(baseAmount * 100)
+    const feePaise = Math.round(platformFee * 100)
+    const total = (basePaise + feePaise) / 100
     return {
       itemSubtotal,
       deliveryFee,
       baseAmount,
       platformFee,
-      total: sumRupees([baseAmount, platformFee]),
+      total,
     }
   }
 

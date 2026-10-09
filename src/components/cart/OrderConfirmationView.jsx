@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { CheckCircle2, Clock, MapPin, Store, ArrowRight, Package, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, Clock, MapPin, Store, ArrowRight, Package, ShieldCheck, AlertCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Price } from '@/components/ui/Price'
@@ -17,6 +17,42 @@ export function OrderConfirmationView({ order, onStartNew }) {
 
   const store = SAMPLE_STORES.find((s) => s.id === order.storeId)
   const location = locations.find((l) => l.id === order.locationId)
+
+  // Validation guard: authoritative pricing must contain complete snapshot with platform fee included
+  const isInvalidPricing =
+    !order?.pricing ||
+    typeof order.pricing.platformFee !== 'number' ||
+    typeof order.pricing.baseAmount !== 'number' ||
+    typeof order.pricing.total !== 'number' ||
+    order.pricing.platformFee <= 0 ||
+    Math.abs(order.pricing.total - (order.pricing.baseAmount + order.pricing.platformFee)) > 0.001
+
+  if (isInvalidPricing) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center space-y-4">
+        <div className="mx-auto grid size-16 place-items-center rounded-full bg-red-500/10 text-danger border border-red-500/20">
+          <AlertCircle className="size-8" aria-hidden="true" />
+        </div>
+        <h1 className="font-display text-2xl font-bold text-ink">Invalid Order Pricing</h1>
+        <p className="text-sm text-ink-muted">
+          The order response is missing authoritative pricing details (platform fee, base amount, or total).
+          Please check your orders or contact campus support.
+        </p>
+        <div className="pt-2 flex flex-col sm:flex-row justify-center gap-3">
+          <Button asChild variant="primary">
+            <Link to="/app" onClick={onStartNew}>
+              <span>Back to Shopping</span>
+            </Link>
+          </Button>
+          <Button asChild variant="secondary">
+            <Link to="/app/orders">
+              <span>View Orders</span>
+            </Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   const distanceMethodLabel =
     order.pricing?.distanceMethod === 'straight_line'
@@ -147,14 +183,12 @@ export function OrderConfirmationView({ order, onStartNew }) {
               </span>
             </div>
 
-            {order.pricing.platformFee != null && (
-              <div className="flex justify-between text-ink-muted">
-                <span>Platform Fee</span>
-                <span className="tabular font-medium text-ink">
-                  {formatINR(order.pricing.platformFee)}
-                </span>
-              </div>
-            )}
+            <div className="flex justify-between text-ink-muted">
+              <span>Platform Fee</span>
+              <span className="tabular font-medium text-ink">
+                {formatINR(order.pricing.platformFee)}
+              </span>
+            </div>
 
             <div className="flex justify-between items-baseline pt-2 border-t border-line font-bold text-base text-ink">
               <span>Total Amount</span>

@@ -131,6 +131,36 @@ describe('Dynamic Platform Fee Allocator Unit Tests', () => {
     const next = allocator.allocate({ orderId: 'ord_2', now: longAfter })
     expect(next.feePaise).toBe(2)
   })
+
+  it('safely releases an active reservation when release() is called', () => {
+    const startTime = 1000000
+    allocator.allocate({ orderId: 'ord_fail', now: startTime })
+
+    // Slot 1 is active
+    expect(allocator.getStatus(1, startTime)).toBe(RESERVATION_STATUS.ACTIVE)
+
+    // Release slot for ord_fail
+    const released = allocator.release({ orderId: 'ord_fail' })
+    expect(released).toBe(true)
+
+    // Slot 1 is immediately available again
+    expect(allocator.getStatus(1, startTime)).toBe(RESERVATION_STATUS.AVAILABLE)
+    expect(allocator.isAvailable(1, startTime)).toBe(true)
+
+    // Next allocation re-allocates slot 1
+    const next = allocator.allocate({ orderId: 'ord_recovered', now: startTime })
+    expect(next.feePaise).toBe(1)
+  })
+
+  it('refuses to release paid reservations', () => {
+    const startTime = 1000000
+    allocator.allocate({ orderId: 'ord_paid', now: startTime })
+    allocator.markPaid({ orderId: 'ord_paid', now: startTime })
+
+    const released = allocator.release({ orderId: 'ord_paid' })
+    expect(released).toBe(false)
+    expect(allocator.getStatus(1, startTime)).toBe(RESERVATION_STATUS.PAID)
+  })
 })
 
 describe('Server Authoritative Orders Integration with Platform Fee', () => {
@@ -208,6 +238,47 @@ describe('Server Authoritative Orders Integration with Platform Fee', () => {
     expect(totals.baseAmount).toBe(71)
     expect(totals.platformFee).toBe(0.01)
     expect(totals.total).toBe(71.01)
+  })
+
+  it('computes exact order totals for subtotal ₹142 + delivery ₹15 -> base ₹157 + platform fee ₹0.01 = ₹157.01', () => {
+    const totals = calculateOrderTotals({
+      lines: [{ unitPrice: 142, quantity: 1 }],
+      deliveryFee: 15,
+      platformFee: 0.01,
+    })
+
+    expect(totals.itemSubtotal).toBe(142)
+    expect(totals.deliveryFee).toBe(15)
+    expect(totals.baseAmount).toBe(157)
+    expect(totals.platformFee).toBe(0.01)
+    expect(totals.total).toBe(157.01)
+    expect(totals.total).toBe(totals.baseAmount + totals.platformFee)
+
+    expect(formatINR(totals.itemSubtotal)).toBe('₹142')
+    expect(formatINR(totals.deliveryFee)).toBe('₹15')
+    expect(formatINR(totals.baseAmount)).toBe('₹157')
+    expect(formatINR(totals.platformFee)).toBe('₹0.01')
+    expect(formatINR(totals.total)).toBe('₹157.01')
+  })
+
+  it('preserves existing payment state safeguards: order creation alone never marks payment as paid', async () => {
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+
+    expect(order.status).toBe('AWAITING_PAYMENT')
+    expect(order.paymentStatus).toBe('PENDING')
+
+    // Allocator reservation remains active, NOT paid
+    const reservation = server.feeAllocator.getReservationForOrder(order.id)
+    expect(reservation).toBeDefined()
+    expect(reservation.paid).toBe(false)
   })
 
   it('fails safely and creates no order when platform fee allocation is exhausted', async () => {

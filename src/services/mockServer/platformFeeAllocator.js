@@ -99,6 +99,27 @@ export function createPlatformFeeAllocator({
     )
   }
 
+  function release({ feePaise, orderId } = {}) {
+    let targetPaise = feePaise
+    if (targetPaise == null && orderId != null) {
+      targetPaise = orderIndex.get(orderId)
+    }
+    if (targetPaise == null) return false
+
+    const res = reservations.get(targetPaise)
+    if (!res || res.paid) return false
+
+    reservations.delete(targetPaise)
+    if (orderId) {
+      orderIndex.delete(orderId)
+    } else {
+      for (const [oid, p] of orderIndex.entries()) {
+        if (p === targetPaise) orderIndex.delete(oid)
+      }
+    }
+    return true
+  }
+
   function markPaid({ feePaise, orderId, now = Date.now() } = {}) {
     let targetPaise = feePaise
     if (targetPaise == null && orderId != null) {
@@ -131,6 +152,7 @@ export function createPlatformFeeAllocator({
 
   return {
     allocate,
+    release,
     isAvailable,
     getStatus,
     markPaid,

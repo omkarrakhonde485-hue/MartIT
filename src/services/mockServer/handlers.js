@@ -161,47 +161,56 @@ export function createMockServer({ routingProvider = null } = {}) {
       const quote = await computeDeliveryQuote(storeId, locationId)
 
       const orderId = newId('ord')
-      // Allocate unique dynamic platform fee (1 paisa - 99 paise)
-      const feeAllocation = db.feeAllocator.allocate({ orderId })
-      const platformFee = feeAllocation.feeRupees
+      let feeAllocation = null
 
-      const totals = calculateOrderTotals({
-        lines: pricedLines,
-        deliveryFee: quote.deliveryFee,
-        platformFee,
-      })
-      const split = splitDeliveryFee(quote.deliveryFee)
+      try {
+        // Allocate unique dynamic platform fee (1 paisa - 99 paise)
+        feeAllocation = db.feeAllocator.allocate({ orderId })
+        const platformFee = feeAllocation.feeRupees
 
-      const order = {
-        id: orderId,
-        customerId: user.id,
-        storeId,
-        locationId,
-        lines: pricedLines,
-        pricing: {
-          itemSubtotal: totals.itemSubtotal,
-          deliveryFee: totals.deliveryFee,
-          baseAmount: totals.baseAmount,
-          platformFee: totals.platformFee,
-          total: totals.total,
-          distanceKm: quote.distanceKm,
-          distanceMethod: quote.distanceMethod,
-          pricingVersion: quote.pricingVersion,
-        },
-        // Internal ledger — never sent to the customer.
-        ledger: {
-          runnerPayout: split.runnerPayout,
-          platformDeliveryShare: split.platformShare,
-          storeCommission: null, // separate ledger, not derived from delivery fee
-        },
-        status: ORDER_STATUS.AWAITING_PAYMENT,
-        paymentStatus: PAYMENT_STATUS.PENDING,
-        createdAt: new Date().toISOString(),
+        const totals = calculateOrderTotals({
+          lines: pricedLines,
+          deliveryFee: quote.deliveryFee,
+          platformFee,
+        })
+        const split = splitDeliveryFee(quote.deliveryFee)
+
+        const order = {
+          id: orderId,
+          customerId: user.id,
+          storeId,
+          locationId,
+          lines: pricedLines,
+          pricing: {
+            itemSubtotal: totals.itemSubtotal,
+            deliveryFee: totals.deliveryFee,
+            baseAmount: totals.baseAmount,
+            platformFee: totals.platformFee,
+            total: totals.total,
+            distanceKm: quote.distanceKm,
+            distanceMethod: quote.distanceMethod,
+            pricingVersion: quote.pricingVersion,
+          },
+          // Internal ledger — never sent to the customer.
+          ledger: {
+            runnerPayout: split.runnerPayout,
+            platformDeliveryShare: split.platformShare,
+            storeCommission: null, // separate ledger, not derived from delivery fee
+          },
+          status: ORDER_STATUS.AWAITING_PAYMENT,
+          paymentStatus: PAYMENT_STATUS.PENDING,
+          createdAt: new Date().toISOString(),
+        }
+        db.orders.push(order)
+
+        const { ledger: _ledger, ...customerView } = order
+        return customerView
+      } catch (err) {
+        if (feeAllocation) {
+          db.feeAllocator.release?.({ orderId })
+        }
+        throw err
       }
-      db.orders.push(order)
-
-      const { ledger: _ledger, ...customerView } = order
-      return customerView
     },
   }
 

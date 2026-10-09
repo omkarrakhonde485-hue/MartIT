@@ -347,5 +347,119 @@ describe('Checkout & Order Confirmation Presentation Safeguards', () => {
     expect(htmlRoute).toContain('1.00 km route distance')
     expect(htmlRoute).not.toContain('straight-line')
   })
+
+  it('rejects incomplete or inconsistent pricing snapshots and displays Invalid Order Pricing', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    const renderWithProviders = (order) =>
+      renderToString(
+        React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          React.createElement(
+            MemoryRouter,
+            null,
+            React.createElement(OrderConfirmationView, { order }),
+          ),
+        ),
+      )
+
+    // Case 1: missing platformFee
+    const orderMissingFee = {
+      id: 'ord_bad_1',
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [],
+      pricing: {
+        itemSubtotal: 142,
+        deliveryFee: 15,
+        baseAmount: 157,
+        total: 157, // No platform fee included!
+      },
+    }
+    const htmlBad1 = renderWithProviders(orderMissingFee)
+    expect(htmlBad1).toContain('Invalid Order Pricing')
+    expect(htmlBad1).not.toContain('Order Created!')
+
+    // Case 2: total does not include the platform fee (total = baseAmount instead of baseAmount + platformFee)
+    const orderInconsistentTotal = {
+      id: 'ord_bad_2',
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [],
+      pricing: {
+        itemSubtotal: 142,
+        deliveryFee: 15,
+        baseAmount: 157,
+        platformFee: 0.01,
+        total: 157, // Inconsistent: 157 != 157 + 0.01
+      },
+    }
+    const htmlBad2 = renderWithProviders(orderInconsistentTotal)
+    expect(htmlBad2).toContain('Invalid Order Pricing')
+    expect(htmlBad2).not.toContain('Order Created!')
+  })
+
+  it('confirms the authoritative pricing for ₹142 subtotal + ₹15 delivery -> ₹157.01 on order creation and confirmation', async () => {
+    const server = createMockServer()
+    const loginToken = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+
+    // Product setup for ₹142 subtotal:
+    // p_bread (45) x 2 = 90
+    // p_milk_500 (28) x 1 = 28
+    // p_chips (24) x 1 = 24
+    // 90 + 28 + 24 = 142
+    // Let's add a custom product or find products in Campus Mart that equal 142
+    server.db.products.push({
+      id: 'p_custom_142',
+      storeId: 'store_campus_mart',
+      name: 'Priced Groceries Bundle',
+      price: 142,
+      stock: 10,
+    })
+
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_custom_142', quantity: 1 }],
+      },
+      { token: loginToken },
+    )
+
+    // Server-authoritative calculations
+    expect(order.pricing.itemSubtotal).toBe(142)
+    expect(order.pricing.deliveryFee).toBe(15)
+    expect(order.pricing.baseAmount).toBe(157)
+    expect(order.pricing.platformFee).toBe(0.01)
+    expect(order.pricing.total).toBe(157.01)
+    expect(order.pricing.total).toBe(order.pricing.baseAmount + order.pricing.platformFee)
+
+    // Render into confirmation view
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const html = renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(
+          MemoryRouter,
+          null,
+          React.createElement(OrderConfirmationView, { order }),
+        ),
+      ),
+    )
+
+    expect(html).toContain('Order Created!')
+    expect(html).toContain('₹142')
+    expect(html).toContain('₹15')
+    expect(html).toContain('Platform Fee')
+    expect(html).toContain('₹0.01')
+    expect(html).toContain('₹157.01')
+  })
 })
 

@@ -144,6 +144,18 @@ export default function CartPage() {
       // Submit through the existing order service
       const newOrder = await orderService.create(orderPayload)
 
+      // Guard: Validate that authoritative order pricing is complete and includes platform fee
+      if (
+        !newOrder?.pricing ||
+        typeof newOrder.pricing.platformFee !== 'number' ||
+        typeof newOrder.pricing.baseAmount !== 'number' ||
+        typeof newOrder.pricing.total !== 'number' ||
+        newOrder.pricing.platformFee <= 0 ||
+        Math.abs(newOrder.pricing.total - (newOrder.pricing.baseAmount + newOrder.pricing.platformFee)) > 0.001
+      ) {
+        throw new Error('Order was created with an invalid pricing snapshot. Please contact support.')
+      }
+
       // Clear cart only after successful response
       clearCart()
       setCreatedOrder(newOrder)
