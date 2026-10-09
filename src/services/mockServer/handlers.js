@@ -5,8 +5,8 @@
  */
 import { calculateDeliveryFee, splitDeliveryFee, DELIVERY_FEE_MESSAGES } from '@/utils/deliveryFee'
 import { calculateOrderTotals } from '@/utils/orderTotals'
-import { ORDER_STATUS } from '@/utils/orderMachine'
-import { PAYMENT_STATUS } from '@/utils/paymentMachine'
+import { ORDER_STATUS, transitionOrder } from '@/utils/orderMachine'
+import { PAYMENT_STATUS, PAYMENT_SOURCE, transitionPayment } from '@/utils/paymentMachine'
 import { SAMPLE_CATEGORIES } from '@/mocks/categories'
 import { createDb } from './db'
 import { ApiError } from './errors'
@@ -191,6 +191,15 @@ export function createMockServer({ routingProvider = null } = {}) {
             distanceMethod: quote.distanceMethod,
             pricingVersion: quote.pricingVersion,
           },
+          payment: {
+            status: PAYMENT_STATUS.PENDING,
+            attemptId: feeAllocation.reservation.attemptId,
+            feePaise: feeAllocation.feePaise,
+            allocatedAt: feeAllocation.reservation.allocatedAt,
+            windowExpiresAt: feeAllocation.reservation.windowExpiresAt,
+            cooldownExpiresAt: feeAllocation.reservation.cooldownExpiresAt,
+            paidAt: null,
+          },
           // Internal ledger — never sent to the customer.
           ledger: {
             runnerPayout: split.runnerPayout,
@@ -202,6 +211,7 @@ export function createMockServer({ routingProvider = null } = {}) {
           createdAt: new Date().toISOString(),
         }
         db.orders.push(order)
+        db.saveOrders?.()
 
         const { ledger: _ledger, ...customerView } = order
         return customerView
@@ -212,11 +222,250 @@ export function createMockServer({ routingProvider = null } = {}) {
         throw err
       }
     },
+
+    /**
+     * Retrieves an order by ID. Validates ownership and applies server-authoritative
+     * expiry checks based on the dynamic platform fee verification window.
+     */
+    'orders.get': ({ orderId }, { token }) => {
+      const user = requireUser(token)
+      if (!orderId) throw new ApiError('INVALID_ORDER_ID', 'Order reference is required.', 400)
+      const order = db.orders.find((o) => o.id === orderId)
+      if (!order) throw new ApiError('ORDER_NOT_FOUND', 'Order not found.', 404)
+
+      const isOwner = order.customerId === user.id
+      const hasStaffAccess =
+        user.roles.includes(ROLES.ADMIN) ||
+        user.roles.includes(ROLES.SUPER_ADMIN) ||
+        user.roles.includes(ROLES.RUNNER)
+
+      if (!isOwner && !hasStaffAccess) {
+        throw new ApiError('FORBIDDEN', 'You do not have permission to view this order.', 403)
+      }
+
+      // Server-authoritative expiry check
+      const now = Date.now()
+      if (
+        order.paymentStatus === PAYMENT_STATUS.PENDING ||
+        order.paymentStatus === PAYMENT_STATUS.PROCESSING
+      ) {
+        if (order.payment?.windowExpiresAt && now >= order.payment.windowExpiresAt) {
+          order.paymentStatus = transitionPayment(
+            order.paymentStatus,
+            PAYMENT_STATUS.EXPIRED,
+            PAYMENT_SOURCE.SYSTEM_TIMER,
+          )
+          if (order.payment) {
+            order.payment.status = PAYMENT_STATUS.EXPIRED
+          }
+          db.saveOrders?.()
+        }
+      }
+
+      const { ledger: _ledger, ...customerView } = order
+      return customerView
+    },
+
+    /**
+     * Checks payment status and requests verification evidence from the verification adapter.
+     * Note: Only server-side evidence ('Payment received') marks payment as PAID.
+     * A 'not received' response is inconclusive and directs the customer to support.
+     */
+    'orders.checkPayment': async ({ orderId }, { token }) => {
+      const user = requireUser(token)
+      if (!orderId) throw new ApiError('INVALID_ORDER_ID', 'Order reference is required.', 400)
+      const order = db.orders.find((o) => o.id === orderId)
+      if (!order) throw new ApiError('ORDER_NOT_FOUND', 'Order not found.', 404)
+
+      const isOwner = order.customerId === user.id
+      const hasStaffAccess =
+        user.roles.includes(ROLES.ADMIN) || user.roles.includes(ROLES.SUPER_ADMIN)
+      if (!isOwner && !hasStaffAccess) {
+        throw new ApiError('FORBIDDEN', "You do not have permission to check this order's payment.", 403)
+      }
+
+      const { ledger: _ledger, ...customerView } = order
+
+      // Already paid
+      if (order.paymentStatus === PAYMENT_STATUS.PAID) {
+        return {
+          order: customerView,
+          status: 'verified',
+          paymentStatus: PAYMENT_STATUS.PAID,
+          message: 'Payment received and verified.',
+        }
+      }
+
+      const now = Date.now()
+
+      // Server-authoritative window expiry check
+      if (order.payment?.windowExpiresAt && now >= order.payment.windowExpiresAt) {
+        if (order.paymentStatus !== PAYMENT_STATUS.EXPIRED) {
+          order.paymentStatus = transitionPayment(
+            order.paymentStatus,
+            PAYMENT_STATUS.EXPIRED,
+            PAYMENT_SOURCE.SYSTEM_TIMER,
+          )
+          if (order.payment) {
+            order.payment.status = PAYMENT_STATUS.EXPIRED
+          }
+          db.saveOrders?.()
+        }
+        const { ledger: _l, ...updatedView } = order
+        return {
+          order: updatedView,
+          status: 'expired',
+          paymentStatus: PAYMENT_STATUS.EXPIRED,
+          message: 'Payment verification window has expired (2 minutes exceeded).',
+        }
+      }
+
+      // Client check moves PENDING -> PROCESSING
+      if (order.paymentStatus === PAYMENT_STATUS.PENDING) {
+        order.paymentStatus = transitionPayment(
+          order.paymentStatus,
+          PAYMENT_STATUS.PROCESSING,
+          PAYMENT_SOURCE.CLIENT,
+        )
+        if (order.payment) {
+          order.payment.status = PAYMENT_STATUS.PROCESSING
+        }
+        db.saveOrders?.()
+      }
+
+      // Query mock verification adapter (simulating Make.com reconciliation)
+      const verification = db.verificationAdapter.verifyPayment({
+        orderId: order.id,
+        amount: order.pricing.total,
+        allocatedAt: order.payment?.allocatedAt,
+        now,
+      })
+
+      if (verification.status === 'verified') {
+        // Trusted Make.com evidence 'Payment received' transitions payment to PAID
+        order.paymentStatus = transitionPayment(
+          order.paymentStatus,
+          PAYMENT_STATUS.PAID,
+          PAYMENT_SOURCE.SERVER_VERIFIED,
+        )
+        if (order.payment) {
+          order.payment.status = PAYMENT_STATUS.PAID
+          order.payment.paidAt = now
+        }
+        order.status = transitionOrder(order.status, ORDER_STATUS.CONFIRMED)
+        db.feeAllocator.markPaid({ orderId: order.id, now })
+        db.saveOrders?.()
+
+        const { ledger: _l, ...verifiedView } = order
+        return {
+          order: verifiedView,
+          status: 'verified',
+          paymentStatus: PAYMENT_STATUS.PAID,
+          rawResponse: verification.rawResponse,
+          message: verification.message,
+        }
+      }
+
+      // Inconclusive response ('not received')
+      // Reset PROCESSING -> PENDING since window is still active
+      if (order.paymentStatus === PAYMENT_STATUS.PROCESSING) {
+        order.paymentStatus = transitionPayment(
+          order.paymentStatus,
+          PAYMENT_STATUS.PENDING,
+          PAYMENT_SOURCE.SERVER_VERIFIED,
+        )
+        if (order.payment) {
+          order.payment.status = PAYMENT_STATUS.PENDING
+        }
+        db.saveOrders?.()
+      }
+
+      const { ledger: _l, ...inconclusiveView } = order
+      return {
+        order: inconclusiveView,
+        status: 'inconclusive',
+        paymentStatus: order.paymentStatus,
+        rawResponse: verification.rawResponse,
+        message: verification.message,
+      }
+    },
+
+    /**
+     * Retries payment for an expired order by allocating a new dynamic platform fee.
+     * The old expired fee remains held in 5-minute cooldown.
+     * Preserves an explicit, auditable attempt history.
+     */
+    'orders.retryPayment': ({ orderId }, { token }) => {
+      const user = requireUser(token)
+      if (!orderId) throw new ApiError('INVALID_ORDER_ID', 'Order reference is required.', 400)
+      const order = db.orders.find((o) => o.id === orderId)
+      if (!order) throw new ApiError('ORDER_NOT_FOUND', 'Order not found.', 404)
+
+      if (order.customerId !== user.id) {
+        throw new ApiError('FORBIDDEN', "You do not have permission to retry this order's payment.", 403)
+      }
+
+      if (
+        order.status !== ORDER_STATUS.AWAITING_PAYMENT ||
+        order.paymentStatus === PAYMENT_STATUS.PAID
+      ) {
+        throw new ApiError('INVALID_STATE', 'This order cannot be retried.', 409)
+      }
+
+      const now = Date.now()
+      const isExpired =
+        order.paymentStatus === PAYMENT_STATUS.EXPIRED ||
+        (order.payment?.windowExpiresAt && now >= order.payment.windowExpiresAt)
+      if (!isExpired) {
+        throw new ApiError('PAYMENT_ACTIVE', 'The current payment window is still active.', 409)
+      }
+
+      // Allocate new platform fee for this attempt
+      const attemptId = newId('att')
+      const newAllocation = db.feeAllocator.allocate({ orderId: order.id, attemptId, now })
+
+      const newTotals = calculateOrderTotals({
+        lines: order.lines,
+        deliveryFee: order.pricing.deliveryFee,
+        platformFee: newAllocation.feeRupees,
+      })
+
+      const previousAttempt = {
+        attemptId: order.payment?.attemptId || order.id,
+        feePaise: order.payment?.feePaise,
+        platformFee: order.pricing.platformFee,
+        allocatedAt: order.payment?.allocatedAt,
+        expiredAt: now,
+      }
+
+      order.pricing.platformFee = newTotals.platformFee
+      order.pricing.total = newTotals.total
+
+      order.payment = {
+        status: PAYMENT_STATUS.PENDING,
+        attemptId,
+        feePaise: newAllocation.feePaise,
+        allocatedAt: newAllocation.reservation.allocatedAt,
+        windowExpiresAt: newAllocation.reservation.windowExpiresAt,
+        cooldownExpiresAt: newAllocation.reservation.cooldownExpiresAt,
+        paidAt: null,
+        history: [...(order.payment?.history || []), previousAttempt],
+      }
+      order.paymentStatus = PAYMENT_STATUS.PENDING
+
+      db.saveOrders?.()
+
+      const { ledger: _ledger, ...customerView } = order
+      return customerView
+    },
   }
 
   return {
     db,
     feeAllocator: db.feeAllocator,
+    verificationAdapter: db.verificationAdapter,
+    recordPaymentEvidence: (orderId, evidence) =>
+      db.verificationAdapter.recordEvidence(orderId, evidence),
     async handle(name, payload = {}, ctx = {}) {
       const handler = handlers[name]
       if (!handler) throw new ApiError('NOT_FOUND', `Unknown endpoint ${name}`, 404)

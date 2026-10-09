@@ -11,4 +11,19 @@ export const orderService = {
       locationId,
       lines: lines.map(({ productId, quantity }) => ({ productId, quantity })),
     }),
+
+  /**
+   * Retrieves an authoritative order by reference ID.
+   */
+  get: (orderId) => request('orders.get', { orderId }),
+
+  /**
+   * Requests server-authoritative payment verification for an order.
+   */
+  checkPayment: (orderId) => request('orders.checkPayment', { orderId }),
+
+  /**
+   * Explicitly retries payment for an expired order by allocating a new dynamic platform fee.
+   */
+  retryPayment: (orderId) => request('orders.retryPayment', { orderId }),
 }

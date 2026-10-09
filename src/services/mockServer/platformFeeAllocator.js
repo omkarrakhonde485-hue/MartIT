@@ -145,6 +145,14 @@ export function createPlatformFeeAllocator({
     return p != null ? getReservation(p) : null
   }
 
+  function restoreReservation(reservation) {
+    if (!reservation || !reservation.feePaise) return
+    reservations.set(reservation.feePaise, { ...reservation })
+    if (reservation.orderId) {
+      orderIndex.set(reservation.orderId, reservation.feePaise)
+    }
+  }
+
   function clear() {
     reservations.clear()
     orderIndex.clear()
@@ -158,6 +166,7 @@ export function createPlatformFeeAllocator({
     markPaid,
     getReservation,
     getReservationForOrder,
+    restoreReservation,
     clear,
     minPaise,
     maxPaise,
