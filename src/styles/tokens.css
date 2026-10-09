@@ -36,7 +36,7 @@
   --accent-soft: #fef3c7;
 
   /* Feedback */
-  --danger: #dc2626;
+  --danger: #b91c1c;            /* 5.3:1 on --danger-soft */
   --danger-soft: #fee2e2;
   --warning: #b45309;
   --warning-soft: #fef3c7;
@@ -131,7 +131,7 @@
 @theme {
   --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   /* Radius scale: 12 / 20 / 28 */
   --radius-tile: 12px;
