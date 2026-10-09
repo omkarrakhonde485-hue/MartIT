@@ -1,0 +1,191 @@
+/*
+ * MartIT design tokens.
+ * Raw values live on :root / [data-theme=dark]; Tailwind utilities are generated
+ * from them via @theme inline (e.g. bg-surface, text-ink, rounded-card).
+ * Brand colours sampled from the MartIT logo (docs/brand/logo-variants.webp).
+ */
+
+:root {
+  /* Surfaces */
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f2;          /* faint green tint, for tiles & wells */
+  --surface-sunk: #e9efea;
+  --line: #e2e8e4;
+  --line-strong: #cbd5ce;
+
+  /* Text (all AA on --bg and --surface) */
+  --ink: #1f2937;                 /* charcoal */
+  --ink-muted: #4b5563;           /* 7.5:1 on white */
+  --ink-subtle: #5f6b7a;          /* 5.3:1 on white */
+  --ink-inverse: #ffffff;
+
+  /* Brand */
+  --brand: #166534;               /* forest — primary actions */
+  --brand-hover: #14532d;
+  --brand-deep: #004421;          /* logo wordmark green */
+  --brand-ink: #ffffff;           /* text on --brand */
+  --brand-soft: #dcfce7;
+  --fresh: #22c55e;               /* live / success — graphics only, never body text on light */
+  --fresh-ink: #15803d;           /* fresh green that passes AA as text */
+
+  /* Accent — logo yellow. One accent element per viewport. */
+  --accent: #fcbe0f;
+  --accent-hover: #f5ae00;
+  --accent-ink: #1f2937;
+  --accent-soft: #fef3c7;
+
+  /* Feedback */
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --warning: #b45309;
+  --warning-soft: #fef3c7;
+  --info: #1d4ed8;
+  --info-soft: #dbeafe;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgb(16 24 20 / 0.06), 0 1px 1px rgb(16 24 20 / 0.04);
+  --shadow-2: 0 8px 24px -8px rgb(16 24 20 / 0.14), 0 2px 6px rgb(16 24 20 / 0.06);
+  --shadow-3: 0 24px 48px -16px rgb(16 24 20 / 0.22);
+  --focus-ring: 0 0 0 3px var(--bg), 0 0 0 5px var(--brand);
+
+  --grain-opacity: 0.05;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0b1410;
+  --surface: #111c17;
+  --surface-2: #17251e;
+  --surface-sunk: #0e1813;
+  --line: #22332a;
+  --line-strong: #2f4539;
+
+  --ink: #ecf3ee;
+  --ink-muted: #b4c2ba;
+  --ink-subtle: #94a49b;
+  --ink-inverse: #0b1410;
+
+  --brand: #22c55e;
+  --brand-hover: #4ade80;
+  --brand-deep: #86efac;
+  --brand-ink: #052e16;
+  --brand-soft: #123524;
+  --fresh: #22c55e;
+  --fresh-ink: #4ade80;
+
+  --accent: #fcbe0f;
+  --accent-hover: #fdd34d;
+  --accent-ink: #1f2937;
+  --accent-soft: #3a2f0b;
+
+  --danger: #f87171;
+  --danger-soft: #3b1414;
+  --warning: #fbbf24;
+  --warning-soft: #3a2a0b;
+  --info: #93c5fd;
+  --info-soft: #172554;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-2: 0 8px 24px -8px rgb(0 0 0 / 0.6);
+  --shadow-3: 0 24px 48px -16px rgb(0 0 0 / 0.7);
+
+  --grain-opacity: 0.07;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-inverse: var(--ink-inverse);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-fresh: var(--fresh);
+  --color-fresh-ink: var(--fresh-ink);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+}
+
+@theme {
+  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  /* Radius scale: 12 / 20 / 28 */
+  --radius-tile: 12px;
+  --radius-card: 20px;
+  --radius-sheet: 28px;
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-soft: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --breakpoint-xs: 23.4375rem; /* 375px */
+
+  --animate-shimmer: shimmer 1.4s var(--ease-in-soft) infinite;
+  --animate-pulse-ring: pulse-ring 1.6s var(--ease-out-soft) infinite;
+  --animate-shake: shake 0.42s var(--ease-out-soft);
+  --animate-fade-in: fade-in 0.24s var(--ease-out-soft);
+  --animate-fade-out: fade-out 0.16s var(--ease-in-soft);
+  --animate-pop-in: pop-in 0.28s var(--ease-out-soft);
+  --animate-pop-out: pop-out 0.16s var(--ease-in-soft);
+  --animate-sheet-in: sheet-in 0.32s var(--ease-out-soft);
+  --animate-sheet-out: sheet-out 0.2s var(--ease-in-soft);
+  --animate-sheet-up: sheet-up 0.32s var(--ease-out-soft);
+  --animate-sheet-down: sheet-down 0.2s var(--ease-in-soft);
+
+  @keyframes shimmer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+  }
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.55; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(3px); }
+  }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+  @keyframes pop-out {
+    from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    to { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+  }
+  @keyframes sheet-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  @keyframes sheet-out { from { transform: translateX(0); } to { transform: translateX(100%); } }
+  @keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @keyframes sheet-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
+}
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
