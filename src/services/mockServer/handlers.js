@@ -7,6 +7,7 @@ import { calculateDeliveryFee, splitDeliveryFee, DELIVERY_FEE_MESSAGES } from '@
 import { calculateOrderTotals } from '@/utils/orderTotals'
 import { ORDER_STATUS } from '@/utils/orderMachine'
 import { PAYMENT_STATUS } from '@/utils/paymentMachine'
+import { SAMPLE_CATEGORIES } from '@/mocks/categories'
 import { createDb } from './db'
 import { ApiError } from './errors'
 import { getDistanceKm } from './routing'
@@ -119,9 +120,18 @@ export function createMockServer({ routingProvider = null } = {}) {
       return publicUser(target)
     },
 
-    // ---- locations ----------------------------------------------------------
+    // ---- locations & stores ------------------------------------------------
     'locations.list': () => db.locations.map(({ id, name, group }) => ({ id, name, group })),
     'stores.list': () => db.stores.map(({ id, name, isOpen }) => ({ id, name, isOpen })),
+
+    // ---- catalogue ----------------------------------------------------------
+    'catalogue.products': ({ storeId } = {}) => {
+      if (storeId) {
+        return db.products.filter((p) => p.storeId === storeId)
+      }
+      return db.products
+    },
+    'catalogue.categories': () => SAMPLE_CATEGORIES,
 
     // ---- delivery quote -----------------------------------------------------
     'delivery.quote': ({ storeId, locationId }) => computeDeliveryQuote(storeId, locationId),

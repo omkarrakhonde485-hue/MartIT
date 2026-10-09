@@ -11,6 +11,18 @@ export const SAMPLE_STORES = [
     coords: { lat: 12.97, lng: 77.59 },
     isOpen: true,
   },
+  {
+    id: 'store_night_canteen',
+    name: 'Night Canteen & Snacks',
+    coords: { lat: 12.972, lng: 77.591 },
+    isOpen: true,
+  },
+  {
+    id: 'store_stationery_hub',
+    name: 'Campus Stationery Hub',
+    coords: { lat: 12.981, lng: 77.59 },
+    isOpen: false,
+  },
 ]
 
 // ~0.001° latitude ≈ 111 m
