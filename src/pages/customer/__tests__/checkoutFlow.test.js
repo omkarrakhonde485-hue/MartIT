@@ -127,11 +127,13 @@ describe('Order Creation & Authoritative Pricing Lifecycle', () => {
     // Server-authoritative calculation:
     // Milk: 28 * 2 = 56, Bread: 45 * 1 = 45 => subtotal 101
     // loc_hostel_b distance is ~0.8 km => fee is 15
-    // Total is 116
+    // Platform fee (smallest available 10 paise) => 0.10
+    // Total is 116.10
     expect(order.pricing).toEqual({
       itemSubtotal: 101,
       deliveryFee: 15,
-      total: 116,
+      platformFee: 0.1,
+      total: 116.1,
       distanceKm: expect.any(Number),
       distanceMethod: 'straight_line',
       pricingVersion: '2026-10-09.1',

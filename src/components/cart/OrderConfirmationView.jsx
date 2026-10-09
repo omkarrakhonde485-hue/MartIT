@@ -144,6 +144,20 @@ export function OrderConfirmationView({ order, onStartNew }) {
               </span>
             </div>
 
+            {order.pricing.platformFee != null && (
+              <div className="flex justify-between text-ink-muted">
+                <div>
+                  <span>Platform Fee</span>
+                  <span className="text-xs text-ink-subtle block">
+                    Dynamic verification code
+                  </span>
+                </div>
+                <span className="tabular font-medium text-ink">
+                  {formatINR(order.pricing.platformFee)}
+                </span>
+              </div>
+            )}
+
             <div className="flex justify-between items-baseline pt-2 border-t border-line font-bold text-base text-ink">
               <span>Total Amount</span>
               <Price amount={order.pricing.total} size="lg" className="text-brand" />

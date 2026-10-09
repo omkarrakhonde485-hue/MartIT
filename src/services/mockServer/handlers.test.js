@@ -44,9 +44,10 @@ describe('orders.create', () => {
       ...base,
       lines: [{ productId: 'p_milk_500', quantity: 2, unitPrice: 1 }],
       deliveryFee: 0,
+      platformFee: 0,
       total: 1,
     })
-    expect(order.pricing).toMatchObject({ itemSubtotal: 56, deliveryFee: 15, total: 71 })
+    expect(order.pricing).toMatchObject({ itemSubtotal: 56, deliveryFee: 15, platformFee: 0.1, total: 71.1 })
     expect(order.lines[0].unitPrice).toBe(28)
   })
 

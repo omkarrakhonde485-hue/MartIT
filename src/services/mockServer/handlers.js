@@ -159,11 +159,21 @@ export function createMockServer({ routingProvider = null } = {}) {
       })
 
       const quote = await computeDeliveryQuote(storeId, locationId)
-      const totals = calculateOrderTotals({ lines: pricedLines, deliveryFee: quote.deliveryFee })
+
+      const orderId = newId('ord')
+      // Allocate unique dynamic platform fee (10 paise - 99 paise)
+      const feeAllocation = db.feeAllocator.allocate({ orderId })
+      const platformFee = feeAllocation.feeRupees
+
+      const totals = calculateOrderTotals({
+        lines: pricedLines,
+        deliveryFee: quote.deliveryFee,
+        platformFee,
+      })
       const split = splitDeliveryFee(quote.deliveryFee)
 
       const order = {
-        id: newId('ord'),
+        id: orderId,
         customerId: user.id,
         storeId,
         locationId,
@@ -171,6 +181,7 @@ export function createMockServer({ routingProvider = null } = {}) {
         pricing: {
           itemSubtotal: totals.itemSubtotal,
           deliveryFee: totals.deliveryFee,
+          platformFee: totals.platformFee,
           total: totals.total,
           distanceKm: quote.distanceKm,
           distanceMethod: quote.distanceMethod,
@@ -195,6 +206,7 @@ export function createMockServer({ routingProvider = null } = {}) {
 
   return {
     db,
+    feeAllocator: db.feeAllocator,
     async handle(name, payload = {}, ctx = {}) {
       const handler = handlers[name]
       if (!handler) throw new ApiError('NOT_FOUND', `Unknown endpoint ${name}`, 404)

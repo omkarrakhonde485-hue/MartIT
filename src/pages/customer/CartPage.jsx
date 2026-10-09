@@ -373,9 +373,21 @@ export default function CartPage() {
                 </span>
               </div>
 
+              <div className="flex justify-between text-ink-muted">
+                <div>
+                  <span>Platform Fee</span>
+                  <span className="text-[11px] text-ink-subtle block">
+                    Dynamic payment routing
+                  </span>
+                </div>
+                <span className="tabular font-medium text-ink">
+                  ₹0.10 – ₹0.99
+                </span>
+              </div>
+
               {/* Total Row */}
               <div className="flex justify-between items-baseline pt-2 border-t border-line font-bold text-base text-ink">
-                <span>Estimated Total</span>
+                <span>Estimated Subtotal + Delivery</span>
                 <Price
                   amount={itemSubtotal + (quote?.deliveryFee ?? 0)}
                   size="lg"
@@ -384,7 +396,7 @@ export default function CartPage() {
               </div>
 
               <p className="text-[11px] text-ink-subtle pt-1">
-                Prices and delivery fees are estimates. The final total will be validated and snapshotted by the server upon checkout.
+                Prices and fees are estimates. The final authoritative total includes the unique platform verification fee assigned upon checkout.
               </p>
             </div>
 

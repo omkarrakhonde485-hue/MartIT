@@ -2,6 +2,7 @@ import { SAMPLE_DELIVERY_LOCATIONS, SAMPLE_STORES } from '@/mocks/campus'
 import { SAMPLE_PRODUCTS } from '@/mocks/catalogue'
 import { SAMPLE_USERS } from '@/mocks/users'
 import { safeStorage } from '@/utils/storage'
+import { createPlatformFeeAllocator } from './platformFeeAllocator'
 
 const SESSIONS_KEY = 'martit-mock-sessions'
 
@@ -28,5 +29,6 @@ export function createDb() {
     users: clone(SAMPLE_USERS),
     sessions: persistedSessions(), // token -> userId
     orders: [],
+    feeAllocator: createPlatformFeeAllocator(),
   }
 }

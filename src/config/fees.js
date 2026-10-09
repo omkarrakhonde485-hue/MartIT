@@ -31,11 +31,22 @@ export const MAX_SERVICE_KM = 5
 export const FREE_DELIVERY_THRESHOLD = null
 
 /**
- * Charges that are NOT yet defined. They stay null and are excluded from totals
+ * Charges that are NOT yet defined. Taxes stay null and are excluded from totals
  * until the product owner sets real values.
  */
 export const TAX_RATE = null
 export const PLATFORM_FEE = null
+
+/**
+ * Dynamic platform fee configuration (Pre-Milestone 3).
+ * Decimal fee assigned uniquely per payment attempt to correlate UPI transactions.
+ * Ranges from ₹0.10 to ₹0.99 (10 to 99 paise).
+ */
+export const PLATFORM_FEE_MIN_PAISE = 10
+export const PLATFORM_FEE_MAX_PAISE = 99
+export const PLATFORM_FEE_WINDOW_MS = 2 * 60 * 1000 // 2-minute verification window
+export const PLATFORM_FEE_COOLDOWN_MS = 5 * 60 * 1000 // 5-minute cooldown after window expiry
+export const PLATFORM_FEE_HOLD_MS = PLATFORM_FEE_WINDOW_MS + PLATFORM_FEE_COOLDOWN_MS // 7 minutes total hold
 
 /**
  * Runner compensation is a separate value from the customer delivery fee.
