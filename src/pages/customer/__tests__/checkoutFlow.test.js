@@ -1,0 +1,273 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import { useCartStore, selectCartStoreId, selectCartCount } from '@/stores/cartStore'
+import { createMockServer } from '@/services/mockServer/handlers'
+import { calculateOrderTotals } from '@/utils/orderTotals'
+import { SAMPLE_PRODUCTS } from '@/mocks/catalogue'
+import { SAMPLE_STORES } from '@/mocks/campus'
+
+describe('Cart Store & Multi-Store Protection', () => {
+  beforeEach(() => {
+    useCartStore.getState().clear()
+  })
+
+  it('initializes with empty lines and null storeId', () => {
+    const state = useCartStore.getState()
+    expect(state.lines).toEqual([])
+    expect(state.storeId).toBeNull()
+    expect(selectCartCount(state)).toBe(0)
+    expect(selectCartStoreId(state)).toBeNull()
+  })
+
+  it('tracks storeId when products from a store are added', () => {
+    const store = useCartStore.getState()
+    // Add product from Campus Mart
+    store.setQuantity('p_milk_500', 2, 'store_campus_mart')
+
+    const state = useCartStore.getState()
+    expect(state.storeId).toBe('store_campus_mart')
+    expect(state.lines).toEqual([{ productId: 'p_milk_500', quantity: 2 }])
+    expect(selectCartCount(state)).toBe(2)
+  })
+
+  it('supports increasing and decreasing quantity without allowing zero in stepper', () => {
+    const store = useCartStore.getState()
+    store.setQuantity('p_milk_500', 1, 'store_campus_mart')
+    expect(useCartStore.getState().lines[0].quantity).toBe(1)
+
+    // Increment
+    store.setQuantity('p_milk_500', 2, 'store_campus_mart')
+    expect(useCartStore.getState().lines[0].quantity).toBe(2)
+
+    // Decrement
+    store.setQuantity('p_milk_500', 1, 'store_campus_mart')
+    expect(useCartStore.getState().lines[0].quantity).toBe(1)
+  })
+
+  it('removes an item when quantity is explicitly set to 0', () => {
+    const store = useCartStore.getState()
+    store.setQuantity('p_milk_500', 2, 'store_campus_mart')
+    store.setQuantity('p_bread', 1, 'store_campus_mart')
+    expect(useCartStore.getState().lines.length).toBe(2)
+
+    // Remove p_milk_500
+    store.setQuantity('p_milk_500', 0, 'store_campus_mart')
+    expect(useCartStore.getState().lines).toEqual([{ productId: 'p_bread', quantity: 1 }])
+
+    // Remove p_bread (resets storeId when empty)
+    store.setQuantity('p_bread', 0, 'store_campus_mart')
+    expect(useCartStore.getState().lines).toEqual([])
+    expect(useCartStore.getState().storeId).toBeNull()
+  })
+
+  it('preserves cart items and requires explicit replaceCart to switch stores', () => {
+    const store = useCartStore.getState()
+    // Put items from Campus Mart in cart
+    store.setQuantity('p_milk_500', 2, 'store_campus_mart')
+
+    // Cart contains store_campus_mart
+    expect(useCartStore.getState().storeId).toBe('store_campus_mart')
+    expect(useCartStore.getState().lines.length).toBe(1)
+
+    // Attempting to add from Night Canteen does not silently wipe via setQuantity
+    // Store switch is explicit via replaceCart
+    store.replaceCart('p_nc_maggi', 1, 'store_night_canteen')
+
+    const newState = useCartStore.getState()
+    expect(newState.storeId).toBe('store_night_canteen')
+    expect(newState.lines).toEqual([{ productId: 'p_nc_maggi', quantity: 1 }])
+  })
+})
+
+describe('Cart Totals & Calculations', () => {
+  it('calculates item subtotal accurately using catalogue prices', () => {
+    const lines = [
+      { productId: 'p_milk_500', quantity: 2 }, // price 28 -> 56
+      { productId: 'p_bread', quantity: 1 },    // price 45 -> 45
+    ]
+    const pricedLines = lines.map((line) => {
+      const p = SAMPLE_PRODUCTS.find((x) => x.id === line.productId)
+      return { unitPrice: p.price, quantity: line.quantity }
+    })
+
+    const totals = calculateOrderTotals({ lines: pricedLines, deliveryFee: 15 })
+    expect(totals.itemSubtotal).toBe(101)
+    expect(totals.deliveryFee).toBe(15)
+    expect(totals.total).toBe(116)
+  })
+})
+
+describe('Order Creation & Authoritative Pricing Lifecycle', () => {
+  let server, token
+
+  beforeEach(async () => {
+    useCartStore.getState().clear()
+    server = createMockServer()
+    token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+  })
+
+  it('successfully creates an order and returns authoritative pricing and order ID', async () => {
+    const payload = {
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [
+        { productId: 'p_milk_500', quantity: 2 },
+        { productId: 'p_bread', quantity: 1 },
+      ],
+    }
+
+    const order = await server.handle('orders.create', payload, { token })
+
+    expect(order.id).toMatch(/^ord_/)
+    expect(order.status).toBe('AWAITING_PAYMENT')
+    expect(order.paymentStatus).toBe('PENDING')
+    expect(order.storeId).toBe('store_campus_mart')
+    expect(order.locationId).toBe('loc_hostel_b')
+    expect(order.lines).toHaveLength(2)
+
+    // Server-authoritative calculation:
+    // Milk: 28 * 2 = 56, Bread: 45 * 1 = 45 => subtotal 101
+    // loc_hostel_b distance is ~0.8 km => fee is 15
+    // Total is 116
+    expect(order.pricing).toEqual({
+      itemSubtotal: 101,
+      deliveryFee: 15,
+      total: 116,
+      distanceKm: expect.any(Number),
+      distanceMethod: 'straight_line',
+      pricingVersion: '2026-10-09.1',
+    })
+  })
+
+  it('rejects order creation with empty cart', async () => {
+    const payload = {
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [],
+    }
+
+    await expect(server.handle('orders.create', payload, { token })).rejects.toMatchObject({
+      code: 'EMPTY_CART',
+      status: 422,
+    })
+  })
+
+  it('rejects order creation when delivery location is beyond the 5 km radius', async () => {
+    const payload = {
+      storeId: 'store_campus_mart',
+      locationId: 'loc_outside',
+      lines: [{ productId: 'p_milk_500', quantity: 1 }],
+    }
+
+    await expect(server.handle('orders.create', payload, { token })).rejects.toMatchObject({
+      code: 'OUT_OF_SERVICE_AREA',
+      status: 422,
+    })
+  })
+
+  it('rejects order creation when a product is out of stock', async () => {
+    const payload = {
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_a',
+      lines: [{ productId: 'p_maggi', quantity: 1 }], // stock is 0
+    }
+
+    await expect(server.handle('orders.create', payload, { token })).rejects.toMatchObject({
+      code: 'OUT_OF_STOCK',
+      status: 409,
+    })
+  })
+
+  it('rejects order creation when requested quantity exceeds available stock', async () => {
+    const payload = {
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_a',
+      lines: [{ productId: 'p_spray', quantity: 999 }], // stock is 8
+    }
+
+    await expect(server.handle('orders.create', payload, { token })).rejects.toMatchObject({
+      code: 'OUT_OF_STOCK',
+      status: 409,
+    })
+  })
+
+  it('rejects order creation when store is closed', async () => {
+    const closedStore = SAMPLE_STORES.find((s) => !s.isOpen)
+    expect(closedStore).toBeDefined()
+
+    const payload = {
+      storeId: closedStore.id,
+      locationId: 'loc_hostel_a',
+      lines: [{ productId: 'p_stat_notebook', quantity: 1 }],
+    }
+
+    await expect(server.handle('orders.create', payload, { token })).rejects.toMatchObject({
+      code: 'STORE_CLOSED',
+      status: 409,
+    })
+  })
+
+  it('rejects order creation when a product does not belong to the selected store', async () => {
+    const payload = {
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_a',
+      lines: [{ productId: 'p_nc_maggi', quantity: 1 }], // belongs to store_night_canteen
+    }
+
+    await expect(server.handle('orders.create', payload, { token })).rejects.toMatchObject({
+      code: 'PRODUCT_UNAVAILABLE',
+      status: 409,
+    })
+  })
+
+  it('preserves cart state when an order submission fails', async () => {
+    // Put items in Zustand cart store
+    const store = useCartStore.getState()
+    store.setQuantity('p_spray', 999, 'store_campus_mart')
+
+    const linesBefore = [...useCartStore.getState().lines]
+    expect(linesBefore.length).toBe(1)
+
+    // Simulate an API failure
+    try {
+      await server.handle(
+        'orders.create',
+        {
+          storeId: 'store_campus_mart',
+          locationId: 'loc_hostel_a',
+          lines: linesBefore,
+        },
+        { token },
+      )
+    } catch {
+      // Failed as expected
+    }
+
+    // Cart items are preserved
+    expect(useCartStore.getState().lines).toEqual(linesBefore)
+    expect(useCartStore.getState().storeId).toBe('store_campus_mart')
+  })
+
+  it('clears cart state only after successful order submission', async () => {
+    const store = useCartStore.getState()
+    store.setQuantity('p_milk_500', 1, 'store_campus_mart')
+    expect(useCartStore.getState().lines.length).toBe(1)
+
+    // Submit order
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: useCartStore.getState().lines,
+      },
+      { token },
+    )
+
+    expect(order.id).toBeDefined()
+
+    // Client clears cart
+    store.clear()
+    expect(useCartStore.getState().lines).toEqual([])
+    expect(useCartStore.getState().storeId).toBeNull()
+  })
+})

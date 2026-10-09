@@ -16,6 +16,7 @@ const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
 const SignupPage = lazy(() => import('@/pages/auth/SignupPage'))
 const CustomerHomePage = lazy(() => import('@/pages/customer/HomePage'))
 const CartPage = lazy(() => import('@/pages/customer/CartPage'))
+const OrderConfirmationPage = lazy(() => import('@/pages/customer/OrderConfirmationPage'))
 const OrdersPage = lazy(() => import('@/pages/customer/OrdersPage'))
 const ProfilePage = lazy(() => import('@/pages/customer/ProfilePage'))
 const RunnerDashboardPage = lazy(() => import('@/pages/runner/RunnerDashboardPage'))
@@ -66,6 +67,7 @@ export const routes = [
             children: [
               { index: true, element: <CustomerHomePage /> },
               { path: 'cart', element: <CartPage /> },
+              { path: 'order-confirmation', element: <OrderConfirmationPage /> },
               { path: 'orders', element: <OrdersPage /> },
               { path: 'profile', element: <ProfilePage /> },
             ],
