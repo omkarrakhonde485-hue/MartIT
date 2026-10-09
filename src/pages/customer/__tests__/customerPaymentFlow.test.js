@@ -35,6 +35,38 @@ describe('UPI QR Payload & Payee Configuration Rules (Scope B)', () => {
     expect(upiResult.uri).toContain('pn=MartIT+Campus+Store')
   })
 
+  it('encodes exactly ₹60.01 with the configured temporary merchant UPI VPA (omkarrakhonde485@oksbi)', () => {
+    // Authoritative calculation: ₹50 base amount + ₹10 delivery fee = ₹60 base amount + ₹0.01 platform fee = ₹60.01
+    const total = 60.01
+    const upiResult = buildUpiPayload({
+      payeeVpa: 'omkarrakhonde485@oksbi',
+      payeeName: 'MartIT',
+      amount: total,
+      orderId: 'ord_test_60_01',
+    })
+
+    expect(upiResult.ok).toBe(true)
+    expect(upiResult.amountFormatted).toBe('60.01')
+    expect(upiResult.uri).toContain('pa=omkarrakhonde485%40oksbi')
+    expect(upiResult.uri).toContain('am=60.01')
+    expect(upiResult.uri).toContain('cu=INR')
+    expect(upiResult.uri).toContain('tr=ord_test_60_01')
+  })
+
+  it('reads the configured UPI payee VPA from env configuration by default', () => {
+    const html = renderToString(
+      React.createElement(PaymentQr, {
+        amount: 60.01,
+        orderId: 'ord_env_test',
+      }),
+    )
+
+    // With VITE_UPI_PAYEE_VPA configured in .env.local, PaymentQr renders with omkarrakhonde485@oksbi
+    expect(html).toContain('omkarrakhonde485@oksbi')
+    expect(html).toContain('₹60.01')
+    expect(html).not.toContain('UPI Payee VPA Not Configured')
+  })
+
   it('fails safely when UPI payee configuration is missing and does NOT invent fake credentials', () => {
     // Empty VPA
     const missingVpaResult = buildUpiPayload({
@@ -256,6 +288,60 @@ describe('Payment Verification Safety (Scope D)', () => {
     // Allocator reservation is locked as paid
     const reservation = server.feeAllocator.getReservation(order.payment.feePaise)
     expect(reservation.paid).toBe(true)
+  })
+
+  it('treats malformed responses, errors, and unknown bodies strictly as inconclusive', async () => {
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+
+    // Malformed HTML response (e.g. gateway error)
+    server.recordPaymentEvidence(order.id, '<html>502 Bad Gateway</html>')
+    let result = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+    expect(result.status).toBe('inconclusive')
+    expect(result.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+
+    // Arbitrary unknown string
+    server.recordPaymentEvidence(order.id, 'UNRECOGNIZED_STATUS')
+    result = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+    expect(result.status).toBe('inconclusive')
+    expect(result.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+
+    // Order remains AWAITING_PAYMENT
+    const retrieved = await server.handle('orders.get', { orderId: order.id }, { token })
+    expect(retrieved.status).toBe(ORDER_STATUS.AWAITING_PAYMENT)
+    expect(retrieved.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+  })
+
+  it('prevents browser requests from overriding authoritative totals or faking payment verification', async () => {
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+
+    // Browser cannot inject paymentStatus: 'PAID' or total: 1
+    const checkRes = await server.handle(
+      'orders.checkPayment',
+      { orderId: order.id, paymentStatus: 'PAID', total: 1 },
+      { token },
+    )
+    expect(checkRes.paymentStatus).not.toBe(PAYMENT_STATUS.PAID)
+    expect(checkRes.order.pricing.total).toBe(order.pricing.total)
+
+    // Replayed check on an unverified order never marks it paid
+    const secondCheck = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+    expect(secondCheck.paymentStatus).not.toBe(PAYMENT_STATUS.PAID)
   })
 })
 
@@ -489,5 +575,32 @@ describe('Explicit Payment Retry Flow', () => {
     expect(retried.payment.history).toBeDefined()
     expect(retried.payment.history.length).toBe(1)
     expect(retried.payment.history[0].feePaise).toBe(1)
+  })
+})
+
+describe('Secret Protection and Build Integrity', () => {
+  it('guarantees that the secret Make.com webhook URL is never exposed in frontend build bundles or source', async () => {
+    const fs = await import('node:fs/promises')
+    const path = await import('node:path')
+
+    const secretWebhookToken = '7bp61vsz2koilncet6m60gjapr2y3mh3'
+    const distPath = path.resolve(process.cwd(), 'dist')
+
+    // Read all files in dist/ to ensure secret is not present in client assets
+    const fileEntries = await fs.readdir(distPath, { recursive: true, withFileTypes: true })
+    const distFiles = fileEntries.filter((f) => f.isFile()).map((f) => path.join(f.parentPath || f.path, f.name))
+
+    for (const filePath of distFiles) {
+      if (
+        filePath.endsWith('.js') ||
+        filePath.endsWith('.html') ||
+        filePath.endsWith('.css') ||
+        filePath.endsWith('.json')
+      ) {
+        const content = await fs.readFile(filePath, 'utf8')
+        expect(content).not.toContain(secretWebhookToken)
+        expect(content).not.toContain('MAKE_VERIFICATION_WEBHOOK_URL')
+      }
+    }
   })
 })
