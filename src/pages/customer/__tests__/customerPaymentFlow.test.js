@@ -1,0 +1,493 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import React from 'react'
+import { renderToString } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createMockServer } from '@/services/mockServer/handlers'
+import { buildUpiPayload } from '@/utils/upi'
+import { calculateOrderTotals } from '@/utils/orderTotals'
+import { PaymentQr } from '@/components/payment/PaymentQr'
+import { CustomerPaymentView } from '@/components/payment/CustomerPaymentView'
+import PaymentPage from '@/pages/customer/PaymentPage'
+import { PAYMENT_STATUS } from '@/utils/paymentMachine'
+import { ORDER_STATUS } from '@/utils/orderMachine'
+import { RESERVATION_STATUS } from '@/services/mockServer/platformFeeAllocator'
+
+describe('UPI QR Payload & Payee Configuration Rules (Scope B)', () => {
+  it('generates the exact UPI URI with authoritative total including platform fee (e.g. ₹157 base + ₹0.01 fee = ₹157.01)', () => {
+    const baseAmount = 157
+    const platformFee = 0.01
+    const total = baseAmount + platformFee // 157.01
+
+    const upiResult = buildUpiPayload({
+      payeeVpa: 'martit.merchant@icici',
+      payeeName: 'MartIT Campus Store',
+      amount: total,
+      orderId: 'ord_test_upi_1',
+    })
+
+    expect(upiResult.ok).toBe(true)
+    expect(upiResult.amountFormatted).toBe('157.01')
+    expect(upiResult.uri).toContain('pa=martit.merchant%40icici')
+    expect(upiResult.uri).toContain('am=157.01')
+    expect(upiResult.uri).toContain('cu=INR')
+    expect(upiResult.uri).toContain('tr=ord_test_upi_1')
+    expect(upiResult.uri).toContain('pn=MartIT+Campus+Store')
+  })
+
+  it('fails safely when UPI payee configuration is missing and does NOT invent fake credentials', () => {
+    // Empty VPA
+    const missingVpaResult = buildUpiPayload({
+      payeeVpa: '',
+      payeeName: 'MartIT',
+      amount: 157.01,
+      orderId: 'ord_test_upi_2',
+    })
+
+    expect(missingVpaResult.ok).toBe(false)
+    expect(missingVpaResult.error).toBe('MISSING_PAYEE_VPA')
+    expect(missingVpaResult.message).toContain('VITE_UPI_PAYEE_VPA')
+    expect(missingVpaResult.uri).toBeUndefined()
+
+    // Render PaymentQr without configured VPA
+    const html = renderToString(
+      React.createElement(PaymentQr, {
+        amount: 157.01,
+        orderId: 'ord_test_upi_2',
+        payeeVpa: '',
+      }),
+    )
+
+    // Clear configuration notice is displayed
+    expect(html).toContain('UPI Payee VPA Not Configured')
+    expect(html).toContain('VITE_UPI_PAYEE_VPA')
+    expect(html).toContain('Failing safely: MartIT will never hardcode fake UPI IDs')
+    // No working or fake QR rendered
+    expect(html).not.toContain('data-testid="genuine-upi-qr"')
+  })
+
+  it('rejects invalid or non-positive payment amounts', () => {
+    const zeroResult = buildUpiPayload({
+      payeeVpa: 'merchant@upi',
+      amount: 0,
+      orderId: 'ord_test_3',
+    })
+    expect(zeroResult.ok).toBe(false)
+    expect(zeroResult.error).toBe('INVALID_AMOUNT')
+
+    const negativeResult = buildUpiPayload({
+      payeeVpa: 'merchant@upi',
+      amount: -10,
+      orderId: 'ord_test_3',
+    })
+    expect(negativeResult.ok).toBe(false)
+    expect(negativeResult.error).toBe('INVALID_AMOUNT')
+  })
+})
+
+describe('Platform Fee Expiry & Cooldown Rules (Scope C)', () => {
+  let server, token
+
+  beforeEach(async () => {
+    server = createMockServer()
+    token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+  })
+
+  it('enforces 2-minute verification window and 5-minute cooldown (7 minutes total hold)', async () => {
+    const startTime = 1000000
+
+    // 1. Order 1 created at startTime
+    const order1 = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+    expect(order1.pricing.platformFee).toBe(0.01)
+    expect(order1.payment.feePaise).toBe(1)
+
+    const reservation1 = server.feeAllocator.getReservation(1)
+    expect(reservation1.allocatedAt).toBeDefined()
+    expect(reservation1.windowExpiresAt).toBe(reservation1.allocatedAt + 2 * 60 * 1000)
+    expect(reservation1.cooldownExpiresAt).toBe(reservation1.windowExpiresAt + 5 * 60 * 1000)
+
+    // 2. Active during 2-minute verification window
+    const insideWindow = reservation1.allocatedAt + 90 * 1000 // 1.5 mins
+    expect(server.feeAllocator.getStatus(1, insideWindow)).toBe(RESERVATION_STATUS.ACTIVE)
+    expect(server.feeAllocator.isAvailable(1, insideWindow)).toBe(false)
+
+    // 3. Exactly at/after 2 minutes -> enters COOLDOWN (not reusable yet!)
+    const justExpired = reservation1.windowExpiresAt + 1
+    expect(server.feeAllocator.getStatus(1, justExpired)).toBe(RESERVATION_STATUS.COOLDOWN)
+    expect(server.feeAllocator.isAvailable(1, justExpired)).toBe(false)
+
+    // 4. During 5-minute cooldown (e.g. 4 minutes in), slot 1 is NOT reusable
+    const midCooldown = reservation1.allocatedAt + 4 * 60 * 1000
+    expect(server.feeAllocator.getStatus(1, midCooldown)).toBe(RESERVATION_STATUS.COOLDOWN)
+    expect(server.feeAllocator.isAvailable(1, midCooldown)).toBe(false)
+
+    // Next order during this time receives slot 2 (2 paise), NOT slot 1
+    const order2 = server.feeAllocator.allocate({ orderId: 'ord_during_cooldown', now: midCooldown })
+    expect(order2.feePaise).toBe(2)
+
+    // 5. At 7 minutes (420,000 ms), cooldown completes and slot 1 becomes reusable
+    const afterCooldown = reservation1.cooldownExpiresAt
+    expect(server.feeAllocator.getStatus(1, afterCooldown)).toBe(RESERVATION_STATUS.AVAILABLE)
+    expect(server.feeAllocator.isAvailable(1, afterCooldown)).toBe(true)
+
+    // Slot 1 is reusable now as the smallest available fee
+    const order3 = server.feeAllocator.allocate({ orderId: 'ord_after_cooldown', now: afterCooldown })
+    expect(order3.feePaise).toBe(1)
+  })
+
+  it('guarantees that a verified/paid fee is NEVER reassigned even after the hold period', async () => {
+    const startTime = 1000000
+
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+    expect(order.payment.feePaise).toBe(1)
+
+    // Provide verified Make.com evidence and check payment
+    server.recordPaymentEvidence(order.id, 'Payment received')
+    const verifyRes = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+    expect(verifyRes.status).toBe('verified')
+    expect(verifyRes.paymentStatus).toBe('PAID')
+
+    // Fast-forward to 1 hour later (well past 7-minute hold)
+    const longAfter = startTime + 60 * 60 * 1000
+    expect(server.feeAllocator.getStatus(1, longAfter)).toBe(RESERVATION_STATUS.PAID)
+    expect(server.feeAllocator.isAvailable(1, longAfter)).toBe(false)
+
+    // Next allocation skips paid slot 1 and allocates slot 2
+    const nextAlloc = server.feeAllocator.allocate({ orderId: 'ord_new_user', now: longAfter })
+    expect(nextAlloc.feePaise).toBe(2)
+  })
+})
+
+describe('Payment Verification Safety (Scope D)', () => {
+  let server, token
+
+  beforeEach(async () => {
+    server = createMockServer()
+    token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+  })
+
+  it('QR display or client interaction alone cannot mark payment verified', async () => {
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+
+    // Order initially awaiting payment
+    expect(order.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+    expect(order.status).toBe(ORDER_STATUS.AWAITING_PAYMENT)
+
+    // Client queries checkPayment without backend evidence
+    const checkRes = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+
+    // Must NOT be verified
+    expect(checkRes.status).not.toBe('verified')
+    expect(checkRes.paymentStatus).not.toBe(PAYMENT_STATUS.PAID)
+    expect(checkRes.order.status).toBe(ORDER_STATUS.AWAITING_PAYMENT)
+  })
+
+  it('inconclusive "not received" response does not mark payment successful or definitively failed', async () => {
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+
+    // No evidence registered -> verification adapter returns 'not received'
+    const result = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+
+    expect(result.status).toBe('inconclusive')
+    expect(result.rawResponse).toBe('not received')
+    expect(result.message).toContain('Payment not detected yet')
+    expect(result.paymentStatus).not.toBe(PAYMENT_STATUS.PAID)
+    expect(result.paymentStatus).not.toBe(PAYMENT_STATUS.FAILED)
+
+    // Order remains awaiting payment, not failed or cancelled
+    const retrieved = await server.handle('orders.get', { orderId: order.id }, { token })
+    expect(retrieved.status).toBe(ORDER_STATUS.AWAITING_PAYMENT)
+    expect(retrieved.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+  })
+
+  it('only trusted server-side "Payment received" evidence transitions payment to PAID and order to CONFIRMED', async () => {
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+
+    // Inject trusted Make.com evidence
+    server.recordPaymentEvidence(order.id, 'Payment received')
+
+    const result = await server.handle('orders.checkPayment', { orderId: order.id }, { token })
+
+    expect(result.status).toBe('verified')
+    expect(result.rawResponse).toBe('Payment received')
+    expect(result.paymentStatus).toBe(PAYMENT_STATUS.PAID)
+    expect(result.order.status).toBe(ORDER_STATUS.CONFIRMED)
+
+    // Allocator reservation is locked as paid
+    const reservation = server.feeAllocator.getReservation(order.payment.feePaise)
+    expect(reservation.paid).toBe(true)
+  })
+})
+
+describe('Customer Payment Screen UI & Countdown (Scope A & F)', () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  const renderWithProviders = (component) =>
+    renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(MemoryRouter, null, component),
+      ),
+    )
+
+  it('derives countdown strictly from authoritative order expiry and renders total breakdown accurately', () => {
+    const now = Date.now()
+    const mockOrder = {
+      id: 'ord_screen_test',
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [{ productId: 'p_milk_500', name: 'Milk 500ml', unitPrice: 28, quantity: 2 }],
+      pricing: {
+        itemSubtotal: 56,
+        deliveryFee: 15,
+        baseAmount: 71,
+        platformFee: 0.01,
+        total: 71.01,
+        distanceKm: 0.8,
+        distanceMethod: 'straight_line',
+        pricingVersion: '2026-10-09.1',
+      },
+      payment: {
+        status: PAYMENT_STATUS.PENDING,
+        feePaise: 1,
+        allocatedAt: now,
+        windowExpiresAt: now + 90 * 1000, // 1m 30s remaining
+        cooldownExpiresAt: now + 420 * 1000,
+      },
+      status: ORDER_STATUS.AWAITING_PAYMENT,
+      paymentStatus: PAYMENT_STATUS.PENDING,
+      createdAt: new Date(now).toISOString(),
+    }
+
+    const html = renderWithProviders(React.createElement(CustomerPaymentView, { initialOrder: mockOrder }))
+
+    // Order and breakdown checks
+    expect(html).toContain('Order #ord_screen_test')
+    expect(html).toContain('₹56')
+    expect(html).toContain('₹15')
+    expect(html).toContain('Allocated Platform Fee')
+    expect(html).toContain('₹0.01')
+    expect(html).toContain('₹71.01')
+
+    // Countdown matches ~1:30 remaining
+    expect(html).toContain('1:30')
+    expect(html).toContain('Time Remaining')
+  })
+
+  it('ensures countdown is derived strictly from authoritative expiry and does not reset on rerender', () => {
+    const fixedNow = 1000000
+    const windowExpiresAt = fixedNow + 75 * 1000 // Exactly 75 seconds left (1:15)
+
+    const order = {
+      id: 'ord_rerender_test',
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [],
+      pricing: { itemSubtotal: 50, deliveryFee: 15, baseAmount: 65, platformFee: 0.01, total: 65.01 },
+      payment: {
+        status: PAYMENT_STATUS.PENDING,
+        feePaise: 1,
+        allocatedAt: fixedNow - 45 * 1000,
+        windowExpiresAt,
+      },
+      status: ORDER_STATUS.AWAITING_PAYMENT,
+      paymentStatus: PAYMENT_STATUS.PENDING,
+      createdAt: new Date(fixedNow - 45 * 1000).toISOString(),
+    }
+
+    // Mock Date.now to fixedNow
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(fixedNow)
+
+    try {
+      // First render: 75 seconds left -> 1:15
+      const html1 = renderWithProviders(React.createElement(CustomerPaymentView, { initialOrder: order }))
+      expect(html1).toContain('1:15')
+      expect(html1).not.toContain('2:00')
+
+      // Advance Date.now by 15 seconds (60 seconds left -> 1:00)
+      dateSpy.mockReturnValue(fixedNow + 15 * 1000)
+
+      // Re-render: timer continues from authoritative expiry (1:00), DOES NOT reset to 2:00 or 1:15
+      const html2 = renderWithProviders(React.createElement(CustomerPaymentView, { initialOrder: { ...order } }))
+      expect(html2).toContain('1:00')
+      expect(html2).not.toContain('2:00')
+      expect(html2).not.toContain('1:15')
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
+
+  it('renders clear states for EXPIRED and PAID orders', () => {
+    const now = Date.now()
+    const expiredOrder = {
+      id: 'ord_exp_test',
+      storeId: 'store_campus_mart',
+      locationId: 'loc_hostel_b',
+      lines: [],
+      pricing: { itemSubtotal: 56, deliveryFee: 15, baseAmount: 71, platformFee: 0.01, total: 71.01 },
+      payment: { status: PAYMENT_STATUS.EXPIRED, windowExpiresAt: now - 1000 },
+      status: ORDER_STATUS.AWAITING_PAYMENT,
+      paymentStatus: PAYMENT_STATUS.EXPIRED,
+      createdAt: new Date(now - 150000).toISOString(),
+    }
+
+    const htmlExpired = renderWithProviders(React.createElement(CustomerPaymentView, { initialOrder: expiredOrder }))
+    expect(htmlExpired).toContain('Payment Window Expired')
+    expect(htmlExpired).toContain('Retry Payment Allocation')
+
+    const paidOrder = {
+      ...expiredOrder,
+      paymentStatus: PAYMENT_STATUS.PAID,
+      payment: { status: PAYMENT_STATUS.PAID },
+      status: ORDER_STATUS.CONFIRMED,
+    }
+
+    const htmlPaid = renderWithProviders(React.createElement(CustomerPaymentView, { initialOrder: paidOrder }))
+    expect(htmlPaid).toContain('Payment Successfully Verified')
+    expect(htmlPaid).toContain('Paid &amp; Confirmed')
+  })
+
+  it('displays a useful error when order reference is missing on PaymentPage', () => {
+    const htmlMissing = renderWithProviders(React.createElement(PaymentPage))
+    expect(htmlMissing).toContain('Missing Order Reference')
+    expect(htmlMissing).toContain('Back to Shopping')
+  })
+})
+
+describe('Server Authoritative orders.get Boundary Tests', () => {
+  let server, token
+
+  beforeEach(async () => {
+    server = createMockServer()
+    token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+  })
+
+  it('server authoritatively marks order payment EXPIRED upon orders.get when window expires', async () => {
+    const now = 1000000
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
+
+    try {
+      const order = await server.handle(
+        'orders.create',
+        {
+          storeId: 'store_campus_mart',
+          locationId: 'loc_hostel_b',
+          lines: [{ productId: 'p_milk_500', quantity: 1 }],
+        },
+        { token },
+      )
+      expect(order.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+
+      // Query within window (1 minute later) -> still PENDING
+      dateSpy.mockReturnValue(now + 60 * 1000)
+      const duringWindow = await server.handle('orders.get', { orderId: order.id }, { token })
+      expect(duringWindow.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+
+      // Query after 2-minute window (120,001 ms) -> server authoritatively marks EXPIRED
+      dateSpy.mockReturnValue(now + 120 * 1000 + 1)
+      const afterWindow = await server.handle('orders.get', { orderId: order.id }, { token })
+      expect(afterWindow.paymentStatus).toBe(PAYMENT_STATUS.EXPIRED)
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
+
+  it('fails safely with 404 error when querying a non-existent order ID', async () => {
+    await expect(
+      server.handle('orders.get', { orderId: 'ord_non_existent' }, { token }),
+    ).rejects.toMatchObject({
+      code: 'ORDER_NOT_FOUND',
+      status: 404,
+    })
+  })
+})
+
+describe('Explicit Payment Retry Flow', () => {
+  let server, token
+
+  beforeEach(async () => {
+    server = createMockServer()
+    token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+  })
+
+  it('allows explicit retry only after order expiry and preserves previous attempt in history', async () => {
+    const now = Date.now()
+
+    const order = await server.handle(
+      'orders.create',
+      {
+        storeId: 'store_campus_mart',
+        locationId: 'loc_hostel_b',
+        lines: [{ productId: 'p_milk_500', quantity: 1 }],
+      },
+      { token },
+    )
+    expect(order.payment.feePaise).toBe(1)
+
+    // Attempting retry while window is active should be rejected
+    await expect(
+      server.handle('orders.retryPayment', { orderId: order.id }, { token }),
+    ).rejects.toMatchObject({
+      code: 'PAYMENT_ACTIVE',
+      status: 409,
+    })
+
+    // Advance order to expired
+    const storedOrder = server.db.orders.find((o) => o.id === order.id)
+    storedOrder.paymentStatus = PAYMENT_STATUS.EXPIRED
+    storedOrder.payment.windowExpiresAt = now - 5000
+
+    // Now explicit retry succeeds
+    const retried = await server.handle('orders.retryPayment', { orderId: order.id }, { token })
+
+    expect(retried.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+    // Slot 1 is still in cooldown, so retry gets slot 2 (2 paise)
+    expect(retried.payment.feePaise).toBe(2)
+    expect(retried.pricing.platformFee).toBe(0.02)
+    // Previous attempt is audited in history
+    expect(retried.payment.history).toBeDefined()
+    expect(retried.payment.history.length).toBe(1)
+    expect(retried.payment.history[0].feePaise).toBe(1)
+  })
+})
