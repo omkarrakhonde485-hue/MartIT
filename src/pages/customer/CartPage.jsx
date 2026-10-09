@@ -159,6 +159,7 @@ export default function CartPage() {
       // Clear cart only after successful response
       clearCart()
       setCreatedOrder(newOrder)
+      navigate(`/app/payment?orderId=${newOrder.id}`, { state: { order: newOrder } })
     } catch (err) {
       setSubmissionError(
         err.message || 'We could not complete your order. Please review your cart and try again.',

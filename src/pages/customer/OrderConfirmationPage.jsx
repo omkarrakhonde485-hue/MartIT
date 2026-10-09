@@ -1,11 +1,51 @@
-import { useLocation, Link } from 'react-router'
-import { ShoppingBag, ArrowLeft } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useLocation, useSearchParams, Link } from 'react-router'
+import { ShoppingBag, ArrowLeft, RefreshCw } from 'lucide-react'
 import { OrderConfirmationView } from '@/components/cart/OrderConfirmationView'
 import { Button } from '@/components/ui/Button'
+import { orderService } from '@/services/orderService'
 
 export default function OrderConfirmationPage() {
   const location = useLocation()
-  const order = location.state?.order
+  const [searchParams] = useSearchParams()
+
+  const orderFromState = location.state?.order
+  const orderId = searchParams.get('orderId') || orderFromState?.id
+
+  const [order, setOrder] = useState(orderFromState || null)
+  const [isLoading, setIsLoading] = useState(!orderFromState && Boolean(orderId))
+
+  useEffect(() => {
+    if (!orderId || orderFromState) return
+
+    let isMounted = true
+    setIsLoading(true)
+
+    orderService
+      .get(orderId)
+      .then((data) => {
+        if (isMounted) setOrder(data)
+      })
+      .catch(() => {
+        if (isMounted) setOrder(null)
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [orderId, orderFromState])
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-20 text-center space-y-3">
+        <RefreshCw className="size-8 animate-spin mx-auto text-brand" aria-hidden="true" />
+        <h2 className="font-display text-lg font-semibold text-ink">Loading Order Details</h2>
+      </div>
+    )
+  }
 
   if (!order) {
     return (

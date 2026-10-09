@@ -93,14 +93,32 @@ export function OrderConfirmationView({ order, onStartNew }) {
         </div>
       </div>
 
-      {/* Payment Phase 3 Scope Notice */}
-      <div className="flex items-start gap-3 rounded-tile border border-sky-500/30 bg-sky-500/5 p-4 text-xs text-ink-muted">
-        <ShieldCheck className="size-4 shrink-0 text-sky-500 mt-0.5" aria-hidden="true" />
-        <div>
-          <strong className="font-semibold text-ink">Payment milestone notice:</strong>{' '}
-          Payment collection (UPI QR, verification, and runner assignment) will be enabled in the upcoming milestone. No payment has been charged yet.
+      {/* Payment Action Banner */}
+      {order.paymentStatus !== 'PAID' ? (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-tile border border-amber-500/40 bg-amber-500/10 p-4 text-xs text-ink">
+          <div className="flex items-start gap-2.5">
+            <Clock className="size-4 shrink-0 text-amber-600 mt-0.5" aria-hidden="true" />
+            <div>
+              <strong className="font-semibold text-ink">Payment Pending:</strong>{' '}
+              <span className="text-ink-muted">
+                Scan the UPI QR code to complete your payment and confirm runner assignment.
+              </span>
+            </div>
+          </div>
+          <Button asChild variant="primary" size="sm" className="shrink-0 w-full sm:w-auto font-semibold">
+            <Link to={`/app/payment?orderId=${order.id}`} state={{ order }}>
+              <span>Proceed to Payment</span>
+              <ArrowRight className="size-3.5" aria-hidden="true" />
+            </Link>
+          </Button>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center gap-2.5 rounded-tile border border-emerald-500/40 bg-emerald-500/10 p-3.5 text-xs text-ink">
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          <strong className="font-semibold text-ink">Payment Verified & Confirmed:</strong>
+          <span className="text-ink-muted">A student runner will pick up your items shortly.</span>
+        </div>
+      )}
 
       {/* Order Details & Authoritative Pricing */}
       <div className="rounded-card border border-line bg-surface p-5 sm:p-6 shadow-2 space-y-6">
