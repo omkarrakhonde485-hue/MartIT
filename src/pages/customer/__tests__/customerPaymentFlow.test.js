@@ -489,7 +489,7 @@ describe('Server Authoritative orders.get Boundary Tests', () => {
     token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
   })
 
-  it('server authoritatively marks order payment EXPIRED upon orders.get when window expires', async () => {
+  it('orders.get is strictly read-only and does NOT mutate payment state; expiration occurs via dedicated orders.expire or checkPayment', async () => {
     const now = 1000000
     const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
 
@@ -509,11 +509,21 @@ describe('Server Authoritative orders.get Boundary Tests', () => {
       dateSpy.mockReturnValue(now + 60 * 1000)
       const duringWindow = await server.handle('orders.get', { orderId: order.id }, { token })
       expect(duringWindow.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+      expect(duringWindow.isWindowExpired).toBe(false)
 
-      // Query after 2-minute window (120,001 ms) -> server authoritatively marks EXPIRED
+      // Query after 2-minute window (120,001 ms) -> strictly read-only, does NOT mutate DB state
       dateSpy.mockReturnValue(now + 120 * 1000 + 1)
       const afterWindow = await server.handle('orders.get', { orderId: order.id }, { token })
-      expect(afterWindow.paymentStatus).toBe(PAYMENT_STATUS.EXPIRED)
+      expect(afterWindow.paymentStatus).toBe(PAYMENT_STATUS.PENDING)
+      expect(afterWindow.isWindowExpired).toBe(true)
+
+      // Dedicated atomic expiration endpoint transitions to EXPIRED
+      const expiredRes = await server.handle('orders.expire', { orderId: order.id }, { token })
+      expect(expiredRes.paymentStatus).toBe(PAYMENT_STATUS.EXPIRED)
+
+      // Now orders.get reflects the terminal EXPIRED state
+      const refreshed = await server.handle('orders.get', { orderId: order.id }, { token })
+      expect(refreshed.paymentStatus).toBe(PAYMENT_STATUS.EXPIRED)
     } finally {
       dateSpy.mockRestore()
     }

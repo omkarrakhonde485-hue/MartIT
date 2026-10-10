@@ -38,9 +38,23 @@ DECLARE
   v_window_exp TIMESTAMPTZ := v_now + (p_window_seconds || ' seconds')::INTERVAL;
   v_cooldown_exp TIMESTAMPTZ := v_window_exp + (p_cooldown_seconds || ' seconds')::INTERVAL;
 BEGIN
+  -- Caller authorization check if running under user session
+  IF auth.uid() IS NOT NULL THEN
+    IF EXISTS (SELECT 1 FROM public.orders WHERE id = p_order_id AND customer_id <> auth.uid()) AND NOT public.auth_is_admin() THEN
+      RAISE EXCEPTION 'PERMISSION_DENIED_ORDER_FEE_ALLOCATION'
+        USING HINT = 'Cannot allocate platform fee for an order belonging to another user.';
+    END IF;
+  END IF;
+
+  -- Guard: Cannot allocate fee for an order already marked PAID
+  IF EXISTS (SELECT 1 FROM public.orders WHERE id = p_order_id AND payment_status = 'PAID') THEN
+    RAISE EXCEPTION 'ORDER_ALREADY_PAID'
+      USING HINT = 'Cannot allocate a platform fee for an order that is already paid.';
+  END IF;
+
   -- Select smallest available paise slot with row-level lock
   SELECT fee_paise INTO v_paise
-  FROM platform_fee_reservations
+  FROM public.platform_fee_reservations
   WHERE (active_order_id IS NULL OR v_now >= cooldown_expires_at)
     AND is_paid = FALSE
   ORDER BY fee_paise ASC
@@ -53,7 +67,7 @@ BEGIN
   END IF;
 
   -- Update the selected slot
-  UPDATE platform_fee_reservations
+  UPDATE public.platform_fee_reservations
   SET
     active_order_id = p_order_id,
     attempt_id = p_attempt_id,
@@ -70,7 +84,7 @@ $$;
 
 -- ============================================================================
 -- 3. RELEASE PLATFORM FEE FUNCTION (e.g. on order creation failure / cancellation)
--- Protected: only releases unpaid reservations
+-- Protected: only releases unpaid reservations and checks caller ownership
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION release_platform_fee(p_order_id VARCHAR(64))
@@ -80,7 +94,21 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-  UPDATE platform_fee_reservations
+  -- Caller authorization check if running under user session
+  IF auth.uid() IS NOT NULL THEN
+    IF EXISTS (SELECT 1 FROM public.orders WHERE id = p_order_id AND customer_id <> auth.uid()) AND NOT public.auth_is_admin() THEN
+      RAISE EXCEPTION 'PERMISSION_DENIED_ORDER_FEE_RELEASE'
+        USING HINT = 'Cannot release a platform fee reservation belonging to another user.';
+    END IF;
+  END IF;
+
+  -- Guard: Paid fees can never be released
+  IF EXISTS (SELECT 1 FROM public.platform_fee_reservations WHERE active_order_id = p_order_id AND is_paid = TRUE) THEN
+    RAISE EXCEPTION 'CANNOT_RELEASE_PAID_FEE'
+      USING HINT = 'Platform fee slot has been paid and cannot be released.';
+  END IF;
+
+  UPDATE public.platform_fee_reservations
   SET
     active_order_id = NULL,
     attempt_id = NULL,
@@ -96,7 +124,8 @@ $$;
 
 -- ============================================================================
 -- 4. MARK PLATFORM FEE PAID FUNCTION (server-verified payment evidence only)
--- Prevents late verification from overwriting terminal states or expired windows
+-- Prevents unverified shortcuts, late verification overwriting terminal states,
+-- and cross-user tampering. Commits inventory hold atomically.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION mark_platform_fee_paid(p_order_id VARCHAR(64))
@@ -107,12 +136,22 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_status payment_status_enum;
+  v_total NUMERIC(10, 2);
   v_window_exp TIMESTAMPTZ;
   v_now TIMESTAMPTZ := NOW();
+  v_has_verified_record BOOLEAN := FALSE;
 BEGIN
+  -- Caller authorization: Direct client calls cannot bypass server verification
+  IF auth.uid() IS NOT NULL THEN
+    IF NOT public.auth_is_admin() THEN
+      RAISE EXCEPTION 'PERMISSION_DENIED_PAYMENT_VERIFICATION'
+        USING HINT = 'Direct client execution of payment verification is forbidden. Must be executed by server-authorized service role.';
+    END IF;
+  END IF;
+
   -- Lock order row to verify current payment state
-  SELECT payment_status, payment_window_expires_at INTO v_status, v_window_exp
-  FROM orders
+  SELECT payment_status, total_payable, payment_window_expires_at INTO v_status, v_total, v_window_exp
+  FROM public.orders
   WHERE id = p_order_id
   FOR UPDATE;
 
@@ -138,8 +177,21 @@ BEGIN
       USING HINT = 'The 2-minute payment verification window has expired.';
   END IF;
 
+  -- Anti-Shortcut Guard: Require authentic, verified payment record matching the exact order total
+  SELECT EXISTS (
+    SELECT 1 FROM public.payment_records
+    WHERE order_id = p_order_id
+      AND amount = v_total
+      AND (status = 'PAID' OR evidence IS NOT NULL)
+  ) INTO v_has_verified_record;
+
+  IF NOT v_has_verified_record THEN
+    RAISE EXCEPTION 'UNVERIFIED_PAYMENT_SHORTCUT_PROHIBITED'
+      USING HINT = 'Cannot mark platform fee paid without a verified payment record matching the order total.';
+  END IF;
+
   -- Mark order payment paid and transition order to CONFIRMED
-  UPDATE orders
+  UPDATE public.orders
   SET
     payment_status = 'PAID',
     status = 'CONFIRMED',
@@ -147,12 +199,17 @@ BEGIN
     updated_at = v_now
   WHERE id = p_order_id;
 
-  -- Mark dynamic platform fee slot as paid (protects slot from reassignment)
-  UPDATE platform_fee_reservations
+  -- Mark dynamic platform fee slot as paid (protects slot forever from reassignment)
+  UPDATE public.platform_fee_reservations
   SET
     is_paid = TRUE,
     paid_at = v_now
   WHERE active_order_id = p_order_id;
+
+  -- Atomically commit held inventory for this order
+  UPDATE public.inventory_reservations
+  SET status = 'COMMITTED', committed_at = v_now
+  WHERE order_id = p_order_id AND status = 'HELD';
 
   RETURN TRUE;
 END;
@@ -161,6 +218,7 @@ $$;
 -- ============================================================================
 -- 5. ATOMIC PAYMENT EXPIRATION FUNCTION
 -- Server-authorized expiration: transitions PENDING/PROCESSING -> EXPIRED
+-- Releases fee slot to cooldown and releases held inventory.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION expire_order_payment(p_order_id VARCHAR(64))
@@ -177,8 +235,16 @@ DECLARE
   v_window_exp TIMESTAMPTZ;
   v_now TIMESTAMPTZ := NOW();
 BEGIN
+  -- Caller authorization check if running under user session
+  IF auth.uid() IS NOT NULL THEN
+    IF EXISTS (SELECT 1 FROM public.orders WHERE id = p_order_id AND customer_id <> auth.uid()) AND NOT public.auth_is_admin() THEN
+      RAISE EXCEPTION 'PERMISSION_DENIED_PAYMENT_EXPIRATION'
+        USING HINT = 'Cannot expire payment for an order belonging to another user.';
+    END IF;
+  END IF;
+
   SELECT payment_status, payment_window_expires_at INTO v_status, v_window_exp
-  FROM orders
+  FROM public.orders
   WHERE id = p_order_id
   FOR UPDATE;
 
@@ -186,18 +252,27 @@ BEGIN
     RAISE EXCEPTION 'ORDER_NOT_FOUND';
   END IF;
 
+  -- Paid orders can never be expired
+  IF v_status = 'PAID' THEN
+    RAISE EXCEPTION 'CANNOT_EXPIRE_PAID_ORDER'
+      USING HINT = 'An order that has been paid and confirmed cannot be expired.';
+  END IF;
+
   -- Only expire if in active pending/processing state and window has passed
   IF v_status IN ('PENDING', 'PROCESSING') AND v_now >= v_window_exp THEN
-    UPDATE orders
+    UPDATE public.orders
     SET payment_status = 'EXPIRED',
         status = 'CANCELLED',
         updated_at = v_now
     WHERE id = p_order_id;
 
-    -- Unbind order from fee slot so it enters cooldown
-    UPDATE platform_fee_reservations
+    -- Unbind order from fee slot so it enters 5-minute cooldown
+    UPDATE public.platform_fee_reservations
     SET active_order_id = NULL
     WHERE active_order_id = p_order_id AND is_paid = FALSE;
+
+    -- Atomically release any held inventory for this order
+    PERFORM public.release_order_inventory(p_order_id);
 
     RETURN QUERY SELECT TRUE, v_status;
   ELSE
@@ -209,6 +284,7 @@ $$;
 -- ============================================================================
 -- 6. ATOMIC INVENTORY RESERVATION FUNCTIONS
 -- Concurrency-safe: uses SELECT FOR UPDATE on product rows
+-- Prevents duplicate holds, overselling, and negative stock.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION reserve_order_inventory(
@@ -228,11 +304,22 @@ DECLARE
   v_now TIMESTAMPTZ := NOW();
   v_exp TIMESTAMPTZ := v_now + (p_ttl_seconds || ' seconds')::INTERVAL;
 BEGIN
+  -- Prevent duplicate reservation holds for the same order
+  IF EXISTS (SELECT 1 FROM public.inventory_reservations WHERE order_id = p_order_id AND status = 'HELD') THEN
+    RAISE EXCEPTION 'RESERVATION_ALREADY_EXISTS'
+      USING HINT = 'An active inventory hold already exists for this order.';
+  END IF;
+
   FOR item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(store_id VARCHAR, product_id VARCHAR, quantity INTEGER)
   LOOP
+    IF item.quantity IS NULL OR item.quantity <= 0 THEN
+      RAISE EXCEPTION 'INVALID_QUANTITY'
+        USING HINT = 'Quantity must be a positive integer.';
+    END IF;
+
     -- Lock product row to prevent overselling
     SELECT stock, is_available INTO v_stock, v_available
-    FROM products
+    FROM public.products
     WHERE id = item.product_id AND store_id = item.store_id
     FOR UPDATE;
 
@@ -247,11 +334,11 @@ BEGIN
     END IF;
 
     -- Record reservation hold
-    INSERT INTO inventory_reservations (id, order_id, store_id, product_id, quantity, status, expires_at, created_at)
+    INSERT INTO public.inventory_reservations (id, order_id, store_id, product_id, quantity, status, expires_at, created_at)
     VALUES ('res_' || gen_random_uuid(), p_order_id, item.store_id, item.product_id, item.quantity, 'HELD', v_exp, v_now);
 
     -- Decrement stock atomically
-    UPDATE products
+    UPDATE public.products
     SET stock = stock - item.quantity, updated_at = v_now
     WHERE id = item.product_id AND store_id = item.store_id;
   END LOOP;
@@ -272,16 +359,16 @@ DECLARE
 BEGIN
   FOR res IN
     SELECT product_id, store_id, quantity
-    FROM inventory_reservations
+    FROM public.inventory_reservations
     WHERE order_id = p_order_id AND status = 'HELD'
     FOR UPDATE
   LOOP
-    UPDATE products
+    UPDATE public.products
     SET stock = stock + res.quantity, updated_at = v_now
     WHERE id = res.product_id AND store_id = res.store_id;
   END LOOP;
 
-  UPDATE inventory_reservations
+  UPDATE public.inventory_reservations
   SET status = 'RELEASED', released_at = v_now
   WHERE order_id = p_order_id AND status = 'HELD';
 

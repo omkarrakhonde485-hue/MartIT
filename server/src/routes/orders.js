@@ -247,6 +247,12 @@ async function handleCheckPayment(req, res, next) {
         .eq('active_order_id', order.id)
         .eq('is_paid', false)
 
+      await supabase
+        .from('inventory_reservations')
+        .update({ status: 'RELEASED', released_at: new Date().toISOString() })
+        .eq('order_id', order.id)
+        .eq('status', 'HELD')
+
       return res.status(200).json({
         orderId: order.id,
         status: 'expired',
@@ -263,7 +269,7 @@ async function handleCheckPayment(req, res, next) {
       .eq('evidence', 'Payment received')
       .maybeSingle()
 
-    if (verifiedPayment) {
+    if (verifiedPayment && Number(verifiedPayment.amount) === Number(order.total_payable)) {
       const paidIso = new Date().toISOString()
       // Transition to PAID
       await supabase
@@ -284,6 +290,16 @@ async function handleCheckPayment(req, res, next) {
           paid_at: paidIso,
         })
         .eq('active_order_id', order.id)
+
+      // Atomically commit held inventory for this order
+      await supabase
+        .from('inventory_reservations')
+        .update({
+          status: 'COMMITTED',
+          committed_at: paidIso,
+        })
+        .eq('order_id', order.id)
+        .eq('status', 'HELD')
 
       return res.status(200).json({
         orderId: order.id,
@@ -356,6 +372,12 @@ async function handleExpirePayment(req, res, next) {
       .update({ active_order_id: null })
       .eq('active_order_id', order.id)
       .eq('is_paid', false)
+
+    await supabase
+      .from('inventory_reservations')
+      .update({ status: 'RELEASED', released_at: nowIso })
+      .eq('order_id', order.id)
+      .eq('status', 'HELD')
 
     res.status(200).json({
       orderId: order.id,

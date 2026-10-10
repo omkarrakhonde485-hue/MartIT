@@ -44,6 +44,47 @@ describe('Environment Variable Validation Hardening', () => {
     }).toThrow(/placeholder/)
   })
 
+  it('fails safely in production if env variables contain template values from .env.example', () => {
+    expect(() => {
+      validateEnv({
+        NODE_ENV: 'production',
+        SUPABASE_URL: 'https://your-project-id.supabase.co',
+        SUPABASE_ANON_KEY: 'your-supabase-anon-key',
+        SUPABASE_SERVICE_ROLE_KEY: 'your-supabase-service-role-secret-key',
+        FRONTEND_ORIGINS: 'https://martit.vercel.app',
+      })
+    }).toThrow(/placeholder|template/)
+  })
+
+  it('fails safely in production if SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are identical', () => {
+    expect(() => {
+      validateEnv({
+        NODE_ENV: 'production',
+        SUPABASE_URL: 'https://valid-project.supabase.co',
+        SUPABASE_ANON_KEY: 'identical-secret-key-123456789012345',
+        SUPABASE_SERVICE_ROLE_KEY: 'identical-secret-key-123456789012345',
+        FRONTEND_ORIGINS: 'https://martit.vercel.app',
+      })
+    }).toThrow(/identical/)
+  })
+
+  it('never prints or leaks credential values in validation error output', () => {
+    const rawSecretValue = 'super-secret-sensitive-anon-key-that-must-not-leak'
+    try {
+      validateEnv({
+        NODE_ENV: 'production',
+        SUPABASE_URL: 'https://valid-project.supabase.co',
+        SUPABASE_ANON_KEY: rawSecretValue, // has 'dummy' or identical failure
+        SUPABASE_SERVICE_ROLE_KEY: rawSecretValue,
+        FRONTEND_ORIGINS: 'https://martit.vercel.app',
+      })
+      expect.fail('Should have thrown validation error')
+    } catch (err) {
+      // The error message must NEVER leak the secret value
+      expect(err.message).not.toContain(rawSecretValue)
+    }
+  })
+
   it('fails safely in production if FRONTEND_ORIGINS is wildcard or localhost', () => {
     expect(() => {
       validateEnv({

@@ -20,6 +20,14 @@ BEGIN
     RAISE EXCEPTION 'SECURITY FAIL: authenticated has EXECUTE on allocate_platform_fee';
   END IF;
 
+  -- Test release_platform_fee
+  IF has_function_privilege('anon', 'release_platform_fee(varchar)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SECURITY FAIL: anon has EXECUTE on release_platform_fee';
+  END IF;
+  IF has_function_privilege('authenticated', 'release_platform_fee(varchar)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SECURITY FAIL: authenticated has EXECUTE on release_platform_fee';
+  END IF;
+
   -- Test mark_platform_fee_paid
   IF has_function_privilege('anon', 'mark_platform_fee_paid(varchar)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SECURITY FAIL: anon has EXECUTE on mark_platform_fee_paid';
@@ -31,6 +39,24 @@ BEGIN
   -- Test expire_order_payment
   IF has_function_privilege('anon', 'expire_order_payment(varchar)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SECURITY FAIL: anon has EXECUTE on expire_order_payment';
+  END IF;
+  IF has_function_privilege('authenticated', 'expire_order_payment(varchar)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SECURITY FAIL: authenticated has EXECUTE on expire_order_payment';
+  END IF;
+
+  -- Test reserve_order_inventory
+  IF has_function_privilege('anon', 'reserve_order_inventory(varchar, jsonb, integer)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SECURITY FAIL: anon has EXECUTE on reserve_order_inventory';
+  END IF;
+
+  -- Test release_order_inventory
+  IF has_function_privilege('anon', 'release_order_inventory(varchar)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SECURITY FAIL: anon has EXECUTE on release_order_inventory';
+  END IF;
+
+  -- Test helper function anon execution
+  IF has_function_privilege('anon', 'auth_is_admin()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SECURITY FAIL: anon has EXECUTE on auth_is_admin';
   END IF;
 
   RAISE NOTICE '✓ TEST 1 PASSED: Client roles cannot execute privileged functions.';
@@ -145,6 +171,215 @@ BEGIN
   END IF;
 
   RAISE NOTICE '✓ TEST 3 PASSED: Composite foreign key rejects items from mismatched stores or orders.';
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- TEST 4: Product Store Mismatch Integrity
+-- Order item product MUST belong to the store specified in the order item
+-- ------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_failed BOOLEAN := FALSE;
+  v_cust_id UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO profiles (id, email, name) VALUES (v_cust_id, 'test_prod_match@campus.edu', 'Test Prod Match')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO orders (
+    id, customer_id, delivery_location_id, delivery_location_snapshot,
+    item_subtotal, combined_delivery_fee, base_amount, platform_fee, total_payable,
+    route_distance_km, route_stop_sequence, routing_provider, routing_mode, fee_policy_version,
+    payment_attempt_id, fee_paise, payment_allocated_at, payment_window_expires_at, payment_cooldown_expires_at,
+    idempotency_key
+  ) VALUES (
+    'ord_pm_1', v_cust_id, 'loc_hostel_a', '{"name":"Hostel"}'::jsonb,
+    50.00, 10.00, 60.00, 0.05, 60.05, 0.4, '[]'::jsonb, 'straight_line', 'walking', '2026-10-09.1',
+    'att_pm_1', 5, NOW(), NOW() + interval '2 minutes', NOW() + interval '7 minutes',
+    'idemp_pm_1'
+  );
+
+  INSERT INTO order_fulfillment_groups (id, order_id, store_id, store_snapshot, pickup_sequence_index)
+  VALUES ('grp_pm_1', 'ord_pm_1', 'store_campus_mart', '{"name":"Campus Mart"}'::jsonb, 0);
+
+  -- Attempt to insert order item with store_campus_mart but product_id that belongs to store_night_canteen
+  BEGIN
+    INSERT INTO order_items (
+      id, order_id, fulfillment_group_id, store_id, product_id,
+      product_name, unit_price, quantity, line_subtotal
+    ) VALUES (
+      'item_rogue_prod', 'ord_pm_1', 'grp_pm_1', 'store_campus_mart', 'p_nc_maggi', -- p_nc_maggi belongs to store_night_canteen!
+      'Cross Store Product', 50.00, 1, 50.00
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    v_failed := TRUE;
+  END;
+
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'INTEGRITY FAIL: Product from another store was accepted into order item!';
+  END IF;
+
+  RAISE NOTICE '✓ TEST 4 PASSED: Product-store foreign key rejects products from mismatched stores.';
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- TEST 5: Payment Record Amount Consistency
+-- Payment record amount MUST exactly match the parent order total_payable
+-- ------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_failed BOOLEAN := FALSE;
+  v_cust_id UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO profiles (id, email, name) VALUES (v_cust_id, 'test_pay_match@campus.edu', 'Test Pay Match')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO orders (
+    id, customer_id, delivery_location_id, delivery_location_snapshot,
+    item_subtotal, combined_delivery_fee, base_amount, platform_fee, total_payable,
+    route_distance_km, route_stop_sequence, routing_provider, routing_mode, fee_policy_version,
+    payment_attempt_id, fee_paise, payment_allocated_at, payment_window_expires_at, payment_cooldown_expires_at,
+    idempotency_key
+  ) VALUES (
+    'ord_pay_amt_1', v_cust_id, 'loc_hostel_a', '{"name":"Hostel"}'::jsonb,
+    100.00, 15.00, 115.00, 0.15, 115.15, 1.0, '[]'::jsonb, 'straight_line', 'walking', '2026-10-09.1',
+    'att_pay_1', 15, NOW(), NOW() + interval '2 minutes', NOW() + interval '7 minutes',
+    'idemp_pay_amt_1'
+  );
+
+  -- Attempt to insert underpaid payment record (₹10 instead of ₹115.15)
+  BEGIN
+    INSERT INTO payment_records (
+      id, order_id, attempt_id, amount, status, evidence
+    ) VALUES (
+      'pay_bad_amt', 'ord_pay_amt_1', 'att_pay_1', 10.00, 'PAID', 'Forged evidence'
+    );
+  EXCEPTION WHEN raise_exception THEN
+    v_failed := TRUE;
+  END;
+
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'INTEGRITY FAIL: Payment record with mismatched amount was accepted!';
+  END IF;
+
+  RAISE NOTICE '✓ TEST 5 PASSED: Payment record trigger enforces exact total_payable amount match.';
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- TEST 6: Unverified Payment Shortcut Prevention
+-- mark_platform_fee_paid CANNOT mark an order paid without a verified payment record
+-- ------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_failed BOOLEAN := FALSE;
+  v_cust_id UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO profiles (id, email, name) VALUES (v_cust_id, 'test_shortcut@campus.edu', 'Test Shortcut')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO orders (
+    id, customer_id, delivery_location_id, delivery_location_snapshot,
+    item_subtotal, combined_delivery_fee, base_amount, platform_fee, total_payable,
+    route_distance_km, route_stop_sequence, routing_provider, routing_mode, fee_policy_version,
+    payment_attempt_id, fee_paise, payment_allocated_at, payment_window_expires_at, payment_cooldown_expires_at,
+    idempotency_key
+  ) VALUES (
+    'ord_shortcut_1', v_cust_id, 'loc_hostel_a', '{"name":"Hostel"}'::jsonb,
+    100.00, 15.00, 115.00, 0.15, 115.15, 1.0, '[]'::jsonb, 'straight_line', 'walking', '2026-10-09.1',
+    'att_sc_1', 15, NOW(), NOW() + interval '2 minutes', NOW() + interval '7 minutes',
+    'idemp_sc_1'
+  );
+
+  -- Attempt to invoke mark_platform_fee_paid without any payment record inserted
+  BEGIN
+    PERFORM mark_platform_fee_paid('ord_shortcut_1');
+  EXCEPTION WHEN raise_exception THEN
+    v_failed := TRUE;
+  END;
+
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'SECURITY FAIL: mark_platform_fee_paid succeeded without verified payment record!';
+  END IF;
+
+  RAISE NOTICE '✓ TEST 6 PASSED: mark_platform_fee_paid rejects unverified payment shortcuts.';
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- TEST 7: Terminal State Late Overwrite Protection
+-- Late verification evidence cannot transition an already EXPIRED order to PAID
+-- ------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_failed BOOLEAN := FALSE;
+  v_cust_id UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO profiles (id, email, name) VALUES (v_cust_id, 'test_terminal@campus.edu', 'Test Terminal')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- Insert order already in EXPIRED terminal state
+  INSERT INTO orders (
+    id, customer_id, delivery_location_id, delivery_location_snapshot,
+    status, payment_status,
+    item_subtotal, combined_delivery_fee, base_amount, platform_fee, total_payable,
+    route_distance_km, route_stop_sequence, routing_provider, routing_mode, fee_policy_version,
+    payment_attempt_id, fee_paise, payment_allocated_at, payment_window_expires_at, payment_cooldown_expires_at,
+    idempotency_key
+  ) VALUES (
+    'ord_term_1', v_cust_id, 'loc_hostel_a', '{"name":"Hostel"}'::jsonb,
+    'CANCELLED', 'EXPIRED',
+    100.00, 15.00, 115.00, 0.15, 115.15, 1.0, '[]'::jsonb, 'straight_line', 'walking', '2026-10-09.1',
+    'att_tm_1', 15, NOW() - interval '10 minutes', NOW() - interval '8 minutes', NOW() - interval '3 minutes',
+    'idemp_term_1'
+  );
+
+  -- Insert payment record matching total
+  INSERT INTO payment_records (
+    id, order_id, attempt_id, amount, status, evidence
+  ) VALUES (
+    'pay_late_1', 'ord_term_1', 'att_tm_1', 115.15, 'PAID', 'Late payment arrived'
+  );
+
+  -- Attempt to invoke mark_platform_fee_paid on the terminal expired order
+  BEGIN
+    PERFORM mark_platform_fee_paid('ord_term_1');
+  EXCEPTION WHEN raise_exception THEN
+    v_failed := TRUE;
+  END;
+
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'SECURITY FAIL: Terminal state was overwritten to PAID!';
+  END IF;
+
+  RAISE NOTICE '✓ TEST 7 PASSED: Terminal states (EXPIRED/FAILED) cannot be overwritten to PAID.';
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- TEST 8: Concurrency & Inventory Oversell Prevention
+-- reserve_order_inventory fails safely when stock is insufficient
+-- ------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_failed BOOLEAN := FALSE;
+BEGIN
+  -- Attempt to reserve 9999 units of milk (stock is 10)
+  BEGIN
+    PERFORM reserve_order_inventory(
+      'ord_oversell_test',
+      '[{"store_id":"store_campus_mart","product_id":"p_cm_milk_toned_500","quantity":9999}]'::jsonb
+    );
+  EXCEPTION WHEN raise_exception THEN
+    v_failed := TRUE;
+  END;
+
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'INTEGRITY FAIL: Excessive inventory reservation was accepted!';
+  END IF;
+
+  RAISE NOTICE '✓ TEST 8 PASSED: Inventory locking prevents overselling.';
 END;
 $$;
 

@@ -112,7 +112,7 @@ async function handleSetRunnerStatus(req, res, next) {
  */
 const roleSchema = z.object({
   userId: z.string().min(1, 'User ID is required'),
-  role: z.enum(['customer', 'runner', 'admin', 'super_admin']),
+  role: z.enum(['customer', 'runner', 'store_owner', 'admin', 'super_admin']),
   granted: z.boolean(),
 })
 

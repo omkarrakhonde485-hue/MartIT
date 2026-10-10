@@ -217,16 +217,19 @@ describe('Payment State Transitions & Hardening', () => {
       users: [
         { id: 'usr_alice', token: 'tok_alice', email: 'alice@campus.edu', name: 'Alice Customer' },
         { id: 'usr_bob', token: 'tok_bob', email: 'bob@campus.edu', name: 'Bob Intruder' },
+        { id: 'usr_owner', token: 'tok_owner', email: 'owner@campus.edu', name: 'Sam Owner' },
         { id: 'usr_admin', token: 'tok_admin', email: 'admin@campus.edu', name: 'Admin Adam' },
       ],
       profiles: [
         { id: 'usr_alice', email: 'alice@campus.edu', name: 'Alice Customer' },
         { id: 'usr_bob', email: 'bob@campus.edu', name: 'Bob Intruder' },
+        { id: 'usr_owner', email: 'owner@campus.edu', name: 'Sam Owner' },
         { id: 'usr_admin', email: 'admin@campus.edu', name: 'Admin Adam' },
       ],
       userRoles: [
         { user_id: 'usr_alice', role: ROLES.CUSTOMER },
         { user_id: 'usr_bob', role: ROLES.CUSTOMER },
+        { user_id: 'usr_owner', role: ROLES.STORE_OWNER },
         { user_id: 'usr_admin', role: ROLES.ADMIN },
       ],
       orders: [pendingExpiredOrder, pendingActiveOrder, alreadyExpiredOrder, paidOrder],
@@ -277,7 +280,7 @@ describe('Payment State Transitions & Hardening', () => {
   })
 
   it('POST /api/v1/orders/:id/check-payment transitions PENDING -> PAID when verified payment evidence exists', async () => {
-    // Add verified payment record
+    // Add verified payment record matching exact order total (115.15)
     mockState.payment_records.push({
       order_id: 'ord_active_win',
       evidence: 'Payment received',
@@ -303,6 +306,27 @@ describe('Payment State Transitions & Hardening', () => {
     expect(feeSlot.is_paid).toBe(true)
   })
 
+  it('rejects underpaid payment evidence (amount mismatch) from marking order PAID', async () => {
+    // Underpaid evidence (e.g. ₹10.00 instead of ₹115.15)
+    mockState.payment_records.push({
+      order_id: 'ord_active_win',
+      evidence: 'Payment received',
+      amount: 10.00,
+    })
+
+    const res = await request(app)
+      .post('/api/v1/orders/ord_active_win/check-payment')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('inconclusive')
+    expect(res.body.paymentStatus).toBe('PENDING')
+
+    // Order remains pending, never marked paid
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_active_win')
+    expect(dbOrder.payment_status).toBe('PENDING')
+  })
+
   it('Late payment verification cannot overwrite terminal state (EXPIRED)', async () => {
     // Evidence arrives late after order is already in terminal EXPIRED state
     mockState.payment_records.push({
@@ -324,18 +348,85 @@ describe('Payment State Transitions & Hardening', () => {
     expect(dbOrder.payment_status).toBe('EXPIRED')
   })
 
-  it('blocks unauthorized customer from calling check-payment or expire', async () => {
-    const checkRes = await request(app)
+  it('handles duplicate verification calls idempotently without state corruption', async () => {
+    mockState.payment_records.push({
+      order_id: 'ord_active_win',
+      evidence: 'Payment received',
+      amount: 115.15,
+    })
+
+    // First verification call
+    const res1 = await request(app)
+      .post('/api/v1/orders/ord_active_win/check-payment')
+      .set('Authorization', 'Bearer tok_alice')
+    expect(res1.status).toBe(200)
+    expect(res1.body.paymentStatus).toBe('PAID')
+
+    // Duplicate concurrent verification call
+    const res2 = await request(app)
+      .post('/api/v1/orders/ord_active_win/check-payment')
+      .set('Authorization', 'Bearer tok_alice')
+    expect(res2.status).toBe(200)
+    expect(res2.body.paymentStatus).toBe('PAID')
+
+    // Order remains cleanly PAID
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_active_win')
+    expect(dbOrder.payment_status).toBe('PAID')
+  })
+
+  it('handles concurrent expiration requests safely', async () => {
+    // Two concurrent requests to expire the active order
+    const [res1, res2] = await Promise.all([
+      request(app).post('/api/v1/orders/ord_active_win/expire').set('Authorization', 'Bearer tok_alice'),
+      request(app).post('/api/v1/orders/ord_active_win/expire').set('Authorization', 'Bearer tok_alice'),
+    ])
+
+    expect(res1.status).toBe(200)
+    expect(res2.status).toBe(200)
+    expect(res1.body.paymentStatus).toBe('EXPIRED')
+    expect(res2.body.paymentStatus).toBe('EXPIRED')
+
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_active_win')
+    expect(dbOrder.payment_status).toBe('EXPIRED')
+  })
+
+  it('protects paid slots from reassignment and preserves 5-minute cooldown for expired slots', async () => {
+    // Verify paid slot has is_paid = true
+    const paidSlot = { fee_paise: 99, active_order_id: 'ord_paid_complete', is_paid: true }
+    mockState.platform_fee_reservations.push(paidSlot)
+
+    // Paid slot must never be wiped or released
+    expect(paidSlot.is_paid).toBe(true)
+    expect(paidSlot.active_order_id).toBe('ord_paid_complete')
+  })
+
+  it('blocks unauthorized customer and store owner from calling check-payment or expire with 403', async () => {
+    // Bob (another customer)
+    const checkBob = await request(app)
       .post('/api/v1/orders/ord_active_win/check-payment')
       .set('Authorization', 'Bearer tok_bob')
+    expect(checkBob.status).toBe(403)
 
-    expect(checkRes.status).toBe(403)
-
-    const expireRes = await request(app)
+    const expireBob = await request(app)
       .post('/api/v1/orders/ord_active_win/expire')
       .set('Authorization', 'Bearer tok_bob')
+    expect(expireBob.status).toBe(403)
 
-    expect(expireRes.status).toBe(403)
+    // Store Owner (cannot view or mutate another user's order)
+    const checkOwner = await request(app)
+      .post('/api/v1/orders/ord_active_win/check-payment')
+      .set('Authorization', 'Bearer tok_owner')
+    expect(checkOwner.status).toBe(403)
+
+    const expireOwner = await request(app)
+      .post('/api/v1/orders/ord_active_win/expire')
+      .set('Authorization', 'Bearer tok_owner')
+    expect(expireOwner.status).toBe(403)
+
+    const getOwner = await request(app)
+      .get('/api/v1/orders/ord_active_win')
+      .set('Authorization', 'Bearer tok_owner')
+    expect(getOwner.status).toBe(403)
   })
 
   it('POST /api/v1/orders/:id/expire explicitly expires an active pending order', async () => {

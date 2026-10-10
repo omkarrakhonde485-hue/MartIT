@@ -15,7 +15,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM user_roles
+    SELECT 1 FROM public.user_roles
     WHERE user_id = auth.uid()
       AND (role = required_role OR role = 'super_admin')
   );
@@ -30,7 +30,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM user_roles
+    SELECT 1 FROM public.user_roles
     WHERE user_id = auth.uid()
       AND (role = 'admin' OR role = 'super_admin')
   );
@@ -45,7 +45,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM user_roles
+    SELECT 1 FROM public.user_roles
     WHERE user_id = auth.uid()
       AND role = 'super_admin'
   );
@@ -60,8 +60,8 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM profiles p
-    JOIN user_roles ur ON ur.user_id = p.id
+    SELECT 1 FROM public.profiles p
+    JOIN public.user_roles ur ON ur.user_id = p.id
     WHERE p.id = auth.uid()
       AND p.runner_status = 'approved'
       AND ur.role = 'runner'
@@ -77,7 +77,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM stores
+    SELECT 1 FROM public.stores
     WHERE id = check_store_id
       AND owner_id = auth.uid()
   );
@@ -92,7 +92,7 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
   -- If not admin/super_admin, user cannot alter runner_status
-  IF OLD.runner_status IS DISTINCT FROM NEW.runner_status AND NOT auth_is_admin() THEN
+  IF OLD.runner_status IS DISTINCT FROM NEW.runner_status AND NOT public.auth_is_admin() THEN
     RAISE EXCEPTION 'PERMISSION_DENIED_RUNNER_STATUS_MODIFICATION'
       USING HINT = 'Only administrators can update runner application status.';
   END IF;
@@ -110,6 +110,20 @@ CREATE TRIGGER trg_prevent_profile_escalation
   BEFORE UPDATE ON profiles
   FOR EACH ROW
   EXECUTE FUNCTION prevent_profile_privilege_escalation();
+
+-- Revoke execute from PUBLIC and anon; grant only to authenticated and service_role
+REVOKE EXECUTE ON FUNCTION auth_user_has_role(role_enum) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION auth_is_admin() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION auth_is_super_admin() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION auth_is_approved_runner() FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION auth_owns_store(VARCHAR) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION prevent_profile_privilege_escalation() FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION auth_user_has_role(role_enum) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth_is_admin() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth_is_super_admin() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth_is_approved_runner() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth_owns_store(VARCHAR) TO authenticated, service_role;
 
 -- ============================================================================
 -- 2. ENABLE ROW LEVEL SECURITY ON ALL USER-ACCESSIBLE TABLES
