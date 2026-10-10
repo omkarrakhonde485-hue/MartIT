@@ -1,8 +1,8 @@
 # MartIT — Implementation Roadmap & Repository Audit
 
-> **Document version:** 1.1.0  
+> **Document version:** 1.2.0  
 > **Last updated:** 2026-10-10  
-> **Repository state:** `main` branch, working-tree verified clean, 136/136 vitest tests passing, production SSR build passing.  
+> **Repository state:** `feat/backend-foundation` branch, working-tree clean, 161/161 vitest tests passing (136 client/mock + 25 server), production SSR build passing.  
 > **Companion Document:** [`docs/backend-architecture.md`](file:///c:/Users/omkar/OneDrive/Desktop/MyProjects/MartIT/docs/backend-architecture.md) (Confirmed Multi-Store Backend Specification)
 
 ---
@@ -124,11 +124,28 @@ The product owner has confirmed the following multi-store policies, detailed ful
 
 ### Milestone 5: Multi-Store Backend Architecture, Persistent Database & Authoritative API
 - [x] **Milestone 5.0: Architecture & Relational Specification:** Comprehensive specification documented in [`docs/backend-architecture.md`](file:///c:/Users/omkar/OneDrive/Desktop/MyProjects/MartIT/docs/backend-architecture.md).
-- [ ] **Milestone 5.1: Supabase PostgreSQL Schema & Relational Models:**
-  - Create tables: `orders`, `order_fulfillment_groups`, `order_items`, `inventory_reservations`, `platform_fee_reservations`.
-  - Enforce foreign keys, unique constraints (e.g. `uq_order_store`), check constraints, and row-level security.
-  - Implement atomic fee allocation stored procedure with `FOR UPDATE SKIP LOCKED`.
-- [ ] **Milestone 5.2: Multi-Stop Routing & Auditable Fee Calculation Engine:**
+- [x] **Milestone 5.1: Supabase PostgreSQL Schema & Relational Models (Implemented):**
+  - Created migrations in `supabase/migrations/`:
+    - `20261010000001_initial_schema.sql` (core entities: `profiles`, `user_roles`, `stores`, `locations`, `categories`, `products`, `orders`, `order_fulfillment_groups`, `order_items`, `inventory_reservations`, `platform_fee_reservations`, `payment_records`, `audit_logs`).
+    - `20261010000002_platform_fee_functions.sql` (seed 99 platform fee slots, atomic allocation function with `FOR UPDATE SKIP LOCKED`).
+    - `20261010000003_row_level_security.sql` (RLS policies for least-privilege customer, runner, store owner, and admin access).
+    - `supabase/seed.sql` (sample campus stores, locations, and catalogue products).
+    - Validation script `scripts/validate-migrations.mjs` verifying syntax, structure, and monetary numeric types.
+- [x] **Milestone 5.2A: Render Express API Foundation (Implemented):**
+  - Implemented Node.js/Express backend in `server/` with:
+    - Environment validation via Zod (`server/src/config/env.js`).
+    - Security headers (`helmet`), CORS configuration, request logging without sensitive data, rate limiting (`express-rate-limit`).
+    - Health and readiness probes (`/healthz`, `/readyz`).
+    - Supabase Auth middleware with role resolution and permission enforcement (`server/src/middleware/auth.js`).
+    - User profile retrieval (`GET /api/v1/auth/me`, `POST /auth/me`).
+    - Catalogue reads (`GET /api/v1/catalogue/products`, `GET /api/v1/catalogue/categories`).
+    - Store and location reads (`GET /api/v1/stores`, `GET /api/v1/locations`).
+    - Delivery quote endpoint with authoritative fee calculation (`POST /api/v1/delivery/quote`).
+    - Authenticated customer order history and order lookup (`GET /api/v1/orders`, `GET /api/v1/orders/:id`, `POST /orders/get`).
+    - Admin user listing, runner approval, and role assignment endpoints (`/api/v1/admin/*`).
+    - Automated unit and integration test suite: 25 tests passing in Vitest.
+    - Render deployment blueprint (`render.yaml`).
+- [ ] **Milestone 5.2B: Multi-Stop Routing & Auditable Fee Calculation Engine:**
   - Connect authoritative routing service (Mapbox Directions / OpenRouteService walking profile).
   - Implement multi-stop waypoint sequencing visiting all stores then customer destination.
   - Apply fee tiers strictly: ₹10 ($\le 0.5$ km), ₹15 ($\le 1$ km), ₹20 ($\le 2$ km), ₹5 per started km up to 5 km; $>5$ km blocked.
@@ -185,9 +202,10 @@ To ensure transparency and deployment safety, MartIT explicitly distinguishes be
 | **Delivery Fee Engine (Single Store)** | **YES** | N/A (Pure logic) | **YES** | 33 vitest tests passing in `deliveryFee.test.js`. |
 | **Dynamic Platform Fee Allocator** | **YES** | **NO** (In-memory mock) | **YES** (Demo mock) | 17 vitest tests passing in `platformFeeAllocator.test.js`. |
 | **UPI QR & Payment Verification Screen** | **YES** | **NO** (Mock adapter) | **YES** (Demo mock) | 20 vitest tests passing in `customerPaymentFlow.test.js`. |
-| **Multi-Store Relational Schema (PostgreSQL)** | **NO** (Architecture defined) | **NO** | **NO** | Documented in `docs/backend-architecture.md`; pending Supabase migration. |
-| **Multi-Stop Route & Fee Engine** | **NO** (Design specified) | **NO** | **NO** | Multi-stop sequencing and fail-closed logic specified. |
+| **Multi-Store Relational Schema (PostgreSQL)** | **YES** | **NO** (Pending Supabase provision) | **NO** | Migrations 01–03 + Seed in `supabase/migrations/`; validated with `db:validate`. |
+| **Render Express API Foundation** | **YES** | **NO** (Tested with mock client) | **NO** | Implemented in `server/`; 25 server tests passing; Render blueprint `render.yaml`. |
+| **Multi-Stop Route & Fee Engine** | **NO** (Design specified) | **NO** | **NO** | Multi-stop sequencing and fail-closed logic specified in `docs/backend-architecture.md`. |
 | **Atomic Multi-Store Order Creation API** | **NO** (Design specified) | **NO** | **NO** | Transactional contract and idempotency specified. |
 | **Single Runner Group Pickup Lifecycle** | **NO** (Design specified) | **NO** | **NO** | Gatekeeper invariant (`OUT_FOR_DELIVERY` blocked until all picked up) specified. |
 | **Rate-Limited Handover OTP Verification** | **NO** (Design specified) | **NO** | **NO** | Max 3 attempts, 5-min lockout specified. |
-| **Combined Multi-Store Customer Checkout** | **NO** (Design specified) | **NO** | **NO** | Blocked on backend schema, routing, and DB integration tests. |
+| **Combined Multi-Store Customer Checkout** | **NO** (Design specified) | **NO** | **NO** | Blocked on routing provider integration and DB E2E testing. |

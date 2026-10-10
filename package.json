@@ -8,15 +8,26 @@
     "build": "vite build && vite build --ssr src/entry-server.jsx --outDir dist-ssr && node scripts/prerender.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "server:dev": "node server/src/index.js",
+    "server:start": "node server/src/index.js",
+    "test:server": "vitest run server/",
+    "test:all": "vitest run && node scripts/validate-migrations.mjs",
+    "db:validate": "node scripts/validate-migrations.mjs"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
     "@fontsource-variable/geist": "^5.3.0",
+    "@supabase/supabase-js": "^2.117.3",
     "@tanstack/react-query": "^5.104.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
     "gsap": "^3.15.0",
+    "helmet": "^8.3.0",
     "lenis": "^1.3.26",
     "lucide-react": "^1.54.0",
     "motion": "^14.0.0",
@@ -27,11 +38,13 @@
     "react-router": "^8.4.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.2",
+    "supertest": "^7.3.1",
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.4",
     "vitest": "^5.0.3"
