@@ -54,7 +54,7 @@ describe('Catalogue & Authoritative Delivery Quote Endpoints', () => {
     expect(res.body[1].isOpen).toBe(false)
   })
 
-  it('calculates short delivery fee (₹10 for <= 0.5 km)', async () => {
+  it('calculates short delivery fee (₹10 for <= 0.5 km) and clearly marks as straight-line estimate', async () => {
     const res = await request(app)
       .post('/api/v1/delivery/quote')
       .send({ storeId: 'store_open', locationId: 'loc_close' })
@@ -63,6 +63,18 @@ describe('Catalogue & Authoritative Delivery Quote Endpoints', () => {
     expect(res.body.deliveryFee).toBe(10)
     expect(res.body.feeLabel).toBe('Short campus delivery')
     expect(res.body.distanceKm).toBeLessThanOrEqual(0.5)
+    expect(res.body.isEstimate).toBe(true)
+    expect(res.body.quoteType).toBe('single_store_straight_line_estimate')
+    expect(res.body.routingProvider).toBe('straight_line_haversine')
+  })
+
+  it('fails-closed on multi-store delivery quote request with 422 MULTI_STORE_ROUTING_UNAVAILABLE', async () => {
+    const res = await request(app)
+      .post('/api/v1/delivery/quote')
+      .send({ storeIds: ['store_open', 'store_closed'], locationId: 'loc_close' })
+
+    expect(res.status).toBe(422)
+    expect(res.body.code).toBe('MULTI_STORE_ROUTING_UNAVAILABLE')
   })
 
   it('calculates mid-distance delivery fee (₹15 for 0.5 - 1.0 km)', async () => {
@@ -75,6 +87,7 @@ describe('Catalogue & Authoritative Delivery Quote Endpoints', () => {
     expect(res.body.feeLabel).toBe('Nearby hostel or campus location')
     expect(res.body.distanceKm).toBeGreaterThan(0.5)
     expect(res.body.distanceKm).toBeLessThanOrEqual(1.0)
+    expect(res.body.isEstimate).toBe(true)
   })
 
   it('rejects quote when store is closed with 409 STORE_CLOSED', async () => {

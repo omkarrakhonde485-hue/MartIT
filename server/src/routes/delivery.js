@@ -7,12 +7,17 @@ export const deliveryRouter = Router()
 
 const PRICING_VERSION = '2026-10-09.1'
 
-const quoteSchema = z.object({
-  storeId: z.string().min(1, 'Store ID is required'),
-  locationId: z.string().min(1, 'Delivery location is required'),
-})
+const singleStoreQuoteSchema = z
+  .object({
+    storeId: z.string().min(1).optional(),
+    storeIds: z.array(z.string()).optional(),
+    locationId: z.string().min(1, 'Delivery location is required'),
+  })
+  .refine((data) => data.storeId || (data.storeIds && data.storeIds.length > 0), {
+    message: 'Store ID is required',
+  })
 
-// Haversine straight-line distance in km
+// Haversine straight-line distance in km (strictly labeled as straight-line estimate)
 function calculateHaversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371 // Earth radius in km
   const dLat = ((lat2 - lat1) * Math.PI) / 180
@@ -29,7 +34,6 @@ function calculateHaversineKm(lat1, lon1, lat2, lon2) {
 
 function calculateTierDeliveryFee(km) {
   if (km <= 0) return { ok: false, reason: 'INVALID_DISTANCE' }
-  // Boundary absorbed by 1 µm float tolerance
   const eps = 1e-9
   if (km <= 0.5 + eps) {
     return { ok: true, fee: 10, label: 'Short campus delivery' }
@@ -50,7 +54,19 @@ function calculateTierDeliveryFee(km) {
 
 async function handleQuote(req, res, next) {
   try {
-    const { storeId, locationId } = quoteSchema.parse(req.body)
+    const body = singleStoreQuoteSchema.parse(req.body)
+
+    // Guard: multi-store quotes must not fabricate route distance without a real provider
+    if (body.storeIds && body.storeIds.length > 1) {
+      throw ApiError.unprocessable(
+        'Multi-store route calculation requires an active walking routing service. Multi-store checkout is not yet enabled.',
+        'MULTI_STORE_ROUTING_UNAVAILABLE',
+        { requestedStores: body.storeIds },
+      )
+    }
+
+    const storeId = body.storeId || body.storeIds?.[0]
+    const { locationId } = body
     const supabase = getSupabaseAdmin()
 
     // Query store
@@ -95,14 +111,19 @@ async function handleQuote(req, res, next) {
       )
     }
 
+    // Return explicit straight-line estimate semantics
     res.status(200).json({
       storeId,
       locationId,
       distanceKm,
       distanceMethod: 'straight_line',
+      routingProvider: 'straight_line_haversine',
+      isEstimate: true,
+      quoteType: 'single_store_straight_line_estimate',
       deliveryFee: feeResult.fee,
       feeLabel: feeResult.label,
       pricingVersion: PRICING_VERSION,
+      disclaimer: 'Straight-line estimate only. Road/walking route distance will be calculated when routing service is enabled.',
     })
   } catch (err) {
     next(err)

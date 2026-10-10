@@ -12,6 +12,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM user_roles
@@ -26,6 +27,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM user_roles
@@ -40,6 +42,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM user_roles
@@ -54,6 +57,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM profiles p
@@ -70,6 +74,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM stores
@@ -83,6 +88,7 @@ CREATE OR REPLACE FUNCTION prevent_profile_privilege_escalation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   -- If not admin/super_admin, user cannot alter runner_status

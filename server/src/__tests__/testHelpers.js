@@ -13,6 +13,8 @@ export function createMockSupabaseClient({
   categories = [],
   products = [],
   orders = [],
+  platform_fee_reservations = [],
+  payment_records = [],
 } = {}) {
   const state = {
     users: [...users],
@@ -23,6 +25,8 @@ export function createMockSupabaseClient({
     categories: [...categories],
     products: [...products],
     orders: [...orders],
+    platform_fee_reservations: [...platform_fee_reservations],
+    payment_records: [...payment_records],
   }
 
   const client = {
@@ -49,7 +53,10 @@ export function createMockSupabaseClient({
     },
 
     from(table) {
-      let currentTableData = state[table] || []
+      if (!state[table]) {
+        state[table] = []
+      }
+      let currentTableData = state[table]
       let filters = []
       let selectedFields = null
       let isSingle = false

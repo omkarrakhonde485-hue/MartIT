@@ -139,3 +139,225 @@ describe('Order History & Detail Endpoints', () => {
     expect(res.body[0].id).toBe('ord_123')
   })
 })
+
+describe('Payment State Transitions & Hardening', () => {
+  let app
+  let mockState
+
+  const pendingExpiredOrder = {
+    id: 'ord_expired_win',
+    customer_id: 'usr_alice',
+    status: 'CREATED',
+    payment_status: 'PENDING',
+    item_subtotal: '100.00',
+    combined_delivery_fee: '15.00',
+    base_amount: '115.00',
+    platform_fee: '0.15',
+    total_payable: '115.15',
+    fee_paise: 15,
+    payment_window_expires_at: new Date(Date.now() - 5000).toISOString(), // expired window
+    payment_cooldown_expires_at: new Date(Date.now() + 300000).toISOString(),
+    created_at: new Date().toISOString(),
+    order_fulfillment_groups: [],
+  }
+
+  const pendingActiveOrder = {
+    id: 'ord_active_win',
+    customer_id: 'usr_alice',
+    status: 'CREATED',
+    payment_status: 'PENDING',
+    item_subtotal: '100.00',
+    combined_delivery_fee: '15.00',
+    base_amount: '115.00',
+    platform_fee: '0.15',
+    total_payable: '115.15',
+    fee_paise: 15,
+    payment_window_expires_at: new Date(Date.now() + 60000).toISOString(), // active window
+    payment_cooldown_expires_at: new Date(Date.now() + 360000).toISOString(),
+    created_at: new Date().toISOString(),
+    order_fulfillment_groups: [],
+  }
+
+  const alreadyExpiredOrder = {
+    id: 'ord_terminal_expired',
+    customer_id: 'usr_alice',
+    status: 'CANCELLED',
+    payment_status: 'EXPIRED',
+    item_subtotal: '100.00',
+    combined_delivery_fee: '15.00',
+    base_amount: '115.00',
+    platform_fee: '0.15',
+    total_payable: '115.15',
+    fee_paise: 15,
+    payment_window_expires_at: new Date(Date.now() - 60000).toISOString(),
+    payment_cooldown_expires_at: new Date(Date.now() + 240000).toISOString(),
+    created_at: new Date().toISOString(),
+    order_fulfillment_groups: [],
+  }
+
+  const paidOrder = {
+    id: 'ord_paid_complete',
+    customer_id: 'usr_alice',
+    status: 'CONFIRMED',
+    payment_status: 'PAID',
+    item_subtotal: '100.00',
+    combined_delivery_fee: '15.00',
+    base_amount: '115.00',
+    platform_fee: '0.15',
+    total_payable: '115.15',
+    fee_paise: 15,
+    payment_window_expires_at: new Date(Date.now() + 60000).toISOString(),
+    payment_cooldown_expires_at: new Date(Date.now() + 360000).toISOString(),
+    created_at: new Date().toISOString(),
+    order_fulfillment_groups: [],
+  }
+
+  beforeEach(() => {
+    const mock = createMockSupabaseClient({
+      users: [
+        { id: 'usr_alice', token: 'tok_alice', email: 'alice@campus.edu', name: 'Alice Customer' },
+        { id: 'usr_bob', token: 'tok_bob', email: 'bob@campus.edu', name: 'Bob Intruder' },
+        { id: 'usr_admin', token: 'tok_admin', email: 'admin@campus.edu', name: 'Admin Adam' },
+      ],
+      profiles: [
+        { id: 'usr_alice', email: 'alice@campus.edu', name: 'Alice Customer' },
+        { id: 'usr_bob', email: 'bob@campus.edu', name: 'Bob Intruder' },
+        { id: 'usr_admin', email: 'admin@campus.edu', name: 'Admin Adam' },
+      ],
+      userRoles: [
+        { user_id: 'usr_alice', role: ROLES.CUSTOMER },
+        { user_id: 'usr_bob', role: ROLES.CUSTOMER },
+        { user_id: 'usr_admin', role: ROLES.ADMIN },
+      ],
+      orders: [pendingExpiredOrder, pendingActiveOrder, alreadyExpiredOrder, paidOrder],
+      platform_fee_reservations: [
+        { fee_paise: 15, active_order_id: 'ord_active_win', is_paid: false },
+        { fee_paise: 15, active_order_id: 'ord_expired_win', is_paid: false },
+      ],
+      payment_records: [],
+    })
+    mockState = mock.state
+    app = createApp()
+  })
+
+  it('GET /api/v1/orders/:id does NOT mutate database state even if payment window has expired', async () => {
+    const res = await request(app)
+      .get('/api/v1/orders/ord_expired_win')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(200)
+    expect(res.body.isWindowExpired).toBe(true)
+    expect(res.body.paymentStatus).toBe('PENDING')
+
+    // Confirm DB record remained PENDING (strictly read-only GET)
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_expired_win')
+    expect(dbOrder.payment_status).toBe('PENDING')
+    expect(dbOrder.status).toBe('CREATED')
+  })
+
+  it('POST /api/v1/orders/:id/check-payment transitions PENDING -> EXPIRED after 2-minute window expires', async () => {
+    const res = await request(app)
+      .post('/api/v1/orders/ord_expired_win/check-payment')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('expired')
+    expect(res.body.paymentStatus).toBe('EXPIRED')
+
+    // Confirm DB order transitioned to EXPIRED and CANCELLED
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_expired_win')
+    expect(dbOrder.payment_status).toBe('EXPIRED')
+    expect(dbOrder.status).toBe('CANCELLED')
+
+    // Confirm fee slot was unbound from active_order_id
+    const feeSlot = mockState.platform_fee_reservations.find(
+      (r) => r.active_order_id === 'ord_expired_win',
+    )
+    expect(feeSlot).toBeUndefined()
+  })
+
+  it('POST /api/v1/orders/:id/check-payment transitions PENDING -> PAID when verified payment evidence exists', async () => {
+    // Add verified payment record
+    mockState.payment_records.push({
+      order_id: 'ord_active_win',
+      evidence: 'Payment received',
+      amount: 115.15,
+    })
+
+    const res = await request(app)
+      .post('/api/v1/orders/ord_active_win/check-payment')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('verified')
+    expect(res.body.paymentStatus).toBe('PAID')
+
+    // Confirm DB order is PAID and CONFIRMED
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_active_win')
+    expect(dbOrder.payment_status).toBe('PAID')
+    expect(dbOrder.status).toBe('CONFIRMED')
+    expect(dbOrder.paid_at).toBeDefined()
+
+    // Confirm platform fee reservation marked is_paid = true
+    const feeSlot = mockState.platform_fee_reservations.find((r) => r.fee_paise === 15)
+    expect(feeSlot.is_paid).toBe(true)
+  })
+
+  it('Late payment verification cannot overwrite terminal state (EXPIRED)', async () => {
+    // Evidence arrives late after order is already in terminal EXPIRED state
+    mockState.payment_records.push({
+      order_id: 'ord_terminal_expired',
+      evidence: 'Payment received',
+      amount: 115.15,
+    })
+
+    const res = await request(app)
+      .post('/api/v1/orders/ord_terminal_expired/check-payment')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('expired')
+    expect(res.body.paymentStatus).toBe('EXPIRED')
+
+    // Order must remain EXPIRED, never mutated to PAID
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_terminal_expired')
+    expect(dbOrder.payment_status).toBe('EXPIRED')
+  })
+
+  it('blocks unauthorized customer from calling check-payment or expire', async () => {
+    const checkRes = await request(app)
+      .post('/api/v1/orders/ord_active_win/check-payment')
+      .set('Authorization', 'Bearer tok_bob')
+
+    expect(checkRes.status).toBe(403)
+
+    const expireRes = await request(app)
+      .post('/api/v1/orders/ord_active_win/expire')
+      .set('Authorization', 'Bearer tok_bob')
+
+    expect(expireRes.status).toBe(403)
+  })
+
+  it('POST /api/v1/orders/:id/expire explicitly expires an active pending order', async () => {
+    const res = await request(app)
+      .post('/api/v1/orders/ord_active_win/expire')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('expired')
+    expect(res.body.paymentStatus).toBe('EXPIRED')
+
+    const dbOrder = mockState.orders.find((o) => o.id === 'ord_active_win')
+    expect(dbOrder.payment_status).toBe('EXPIRED')
+    expect(dbOrder.status).toBe('CANCELLED')
+  })
+
+  it('POST /api/v1/orders/:id/expire rejects expiring an already PAID order with 409 Conflict', async () => {
+    const res = await request(app)
+      .post('/api/v1/orders/ord_paid_complete/expire')
+      .set('Authorization', 'Bearer tok_alice')
+
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe('ALREADY_PAID')
+  })
+})

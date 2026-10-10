@@ -16,6 +16,7 @@ describe('Authentication & Authorization Endpoints', () => {
         { id: 'usr_admin', token: 'tok_admin', email: 'admin@campus.edu', name: 'Carol Admin' },
         { id: 'usr_super', token: 'tok_super', email: 'super@campus.edu', name: 'Dave Super' },
         { id: 'usr_applicant', token: 'tok_app', email: 'applicant@campus.edu', name: 'Eve Applicant' },
+        { id: 'usr_owner', token: 'tok_owner', email: 'owner@campus.edu', name: 'Sam Owner' },
       ],
       profiles: [
         { id: 'usr_customer', email: 'customer@campus.edu', name: 'Alice Cust', runner_status: null, default_location_id: 'loc_hostel_a' },
@@ -23,6 +24,7 @@ describe('Authentication & Authorization Endpoints', () => {
         { id: 'usr_admin', email: 'admin@campus.edu', name: 'Carol Admin', runner_status: null, default_location_id: null },
         { id: 'usr_super', email: 'super@campus.edu', name: 'Dave Super', runner_status: null, default_location_id: null },
         { id: 'usr_applicant', email: 'applicant@campus.edu', name: 'Eve Applicant', runner_status: 'applicant', default_location_id: null },
+        { id: 'usr_owner', email: 'owner@campus.edu', name: 'Sam Owner', runner_status: null, default_location_id: null },
       ],
       userRoles: [
         { user_id: 'usr_customer', role: ROLES.CUSTOMER },
@@ -30,6 +32,7 @@ describe('Authentication & Authorization Endpoints', () => {
         { user_id: 'usr_admin', role: ROLES.ADMIN },
         { user_id: 'usr_super', role: ROLES.SUPER_ADMIN },
         { user_id: 'usr_applicant', role: ROLES.CUSTOMER },
+        { user_id: 'usr_owner', role: ROLES.STORE_OWNER },
       ],
     })
     state = mock.state
@@ -84,7 +87,7 @@ describe('Authentication & Authorization Endpoints', () => {
       .set('Authorization', 'Bearer tok_admin')
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
-    expect(res.body.length).toBe(5)
+    expect(res.body.length).toBe(6)
   })
 
   it('approves a runner applicant and grants runner role', async () => {
@@ -123,5 +126,34 @@ describe('Authentication & Authorization Endpoints', () => {
 
     expect(res.status).toBe(409)
     expect(res.body.code).toBe('SELF_DEMOTION')
+  })
+
+  it('blocks store owner from accessing admin user list with 403', async () => {
+    const res = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', 'Bearer tok_owner')
+
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('FORBIDDEN')
+  })
+
+  it('blocks store owner from modifying user roles with 403', async () => {
+    const res = await request(app)
+      .post('/admin/roles/set')
+      .set('Authorization', 'Bearer tok_owner')
+      .send({ userId: 'usr_owner', role: ROLES.ADMIN, granted: true })
+
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('FORBIDDEN')
+  })
+
+  it('blocks store owner from approving runner applicants with 403', async () => {
+    const res = await request(app)
+      .post('/admin/runners/setStatus')
+      .set('Authorization', 'Bearer tok_owner')
+      .send({ userId: 'usr_applicant', status: 'approved' })
+
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('FORBIDDEN')
   })
 })

@@ -196,7 +196,12 @@ CREATE TABLE orders (
   -- Idempotency & Auditing
   idempotency_key VARCHAR(128) UNIQUE NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Database Integrity Invariants (Money consistency)
+  CONSTRAINT chk_orders_base_amount CHECK (base_amount = ROUND(item_subtotal + combined_delivery_fee)),
+  CONSTRAINT chk_orders_total_payable CHECK (total_payable = base_amount + platform_fee),
+  CONSTRAINT chk_orders_fee_paise CHECK (fee_paise = ROUND(platform_fee * 100))
 );
 
 CREATE INDEX idx_orders_customer ON orders(customer_id);
@@ -226,7 +231,8 @@ CREATE TABLE order_fulfillment_groups (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   
-  CONSTRAINT uq_order_store UNIQUE (order_id, store_id)
+  CONSTRAINT uq_order_store UNIQUE (order_id, store_id),
+  CONSTRAINT uq_group_order_store UNIQUE (id, order_id, store_id)
 );
 
 CREATE INDEX idx_fulfillment_groups_order ON order_fulfillment_groups(order_id);
@@ -234,13 +240,13 @@ CREATE INDEX idx_fulfillment_groups_store_status ON order_fulfillment_groups(sto
 
 -- ============================================================================
 -- 6. ORDER ITEMS (LINE ITEMS PER FULFILLMENT GROUP)
--- Immutable snapshots of purchased items.
+-- Immutable snapshots of purchased items with multi-column relational integrity.
 -- ============================================================================
 
 CREATE TABLE order_items (
   id VARCHAR(64) PRIMARY KEY,
   order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  fulfillment_group_id VARCHAR(64) NOT NULL REFERENCES order_fulfillment_groups(id) ON DELETE CASCADE,
+  fulfillment_group_id VARCHAR(64) NOT NULL,
   store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
   product_id VARCHAR(64) NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
   
@@ -251,7 +257,12 @@ CREATE TABLE order_items (
   quantity INTEGER NOT NULL CHECK (quantity >= 1),
   line_subtotal NUMERIC(10, 2) NOT NULL CHECK (line_subtotal >= 0),
   
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Strict Relational Integrity: Item MUST belong to the exact same order & store as its group
+  CONSTRAINT fk_item_fulfillment_group FOREIGN KEY (fulfillment_group_id, order_id, store_id)
+    REFERENCES order_fulfillment_groups(id, order_id, store_id) ON DELETE CASCADE,
+  CONSTRAINT chk_line_subtotal CHECK (line_subtotal = unit_price * quantity)
 );
 
 CREATE INDEX idx_order_items_order ON order_items(order_id);
