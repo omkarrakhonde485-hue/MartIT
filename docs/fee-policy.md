@@ -20,11 +20,23 @@
 - The fee is calculated from the **unrounded** distance, so 1.001 km costs ₹20, never ₹15. The only tolerance is 1 µm, which absorbs floating-point noise.
 
 ## Authority and snapshots
-- The server calculates the authoritative distance, from the selected store to the saved delivery location. The browser shows estimates only.
+- The server calculates the authoritative distance, from the selected store (or across all participating stores for multi-store orders) to the saved delivery location. The browser shows estimates only.
 - A fee submitted by the browser is never trusted. The server re-prices items, re-checks stock and recalculates the fee when the order is created.
 - Each order saves its delivery fee, distance, distance method and pricing version, so later pricing changes don't affect existing orders.
 - If the delivery location or store changes, the fee is re-quoted before checkout is confirmed.
 - Outside the service radius, checkout is blocked with a clear message.
+
+## Multi-store combined route policy (Confirmed 2026-10-10)
+- When a customer purchases products across multiple stores in a single checkout, exactly **one combined delivery fee** is charged based on the complete multi-stop route.
+- The combined route visits all participating store pickup locations and finishes at the customer delivery location.
+- The existing distance fee tiers apply directly to the combined route distance:
+  - ₹10 up to 0.5 km.
+  - ₹15 above 0.5 km through 1 km.
+  - ₹20 above 1 km through 2 km.
+  - ₹5 for each started kilometre above 2 km through 5 km (`20 + 5 × ceil(d − 2)`).
+  - Routes exceeding 5 km are blocked.
+- The route distance must be based on an authoritative, real route calculation from a configured routing provider (walking/road), never straight-line estimates or fabricated numbers.
+- If no configured route provider is available, or the combined route cannot be calculated reliably, no distance or fee is fabricated, and checkout is blocked with an explicit error.
 
 ## Distance method
 - When a routing service is available, its route distance is used (`distanceMethod: 'route'`).
