@@ -1,8 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import React from 'react'
+import { renderToString } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMockServer } from '@/services/mockServer/handlers'
-import { useCartStore } from '@/stores/cartStore'
+import { useCartStore, selectCartStoreId } from '@/stores/cartStore'
+import { useAuthStore } from '@/stores/authStore'
 import { SAMPLE_PRODUCTS } from '@/mocks/catalogue'
 import { SAMPLE_CATEGORIES } from '@/mocks/categories'
+import { SAMPLE_STORES } from '@/mocks/campus'
+import { ProductCard } from '@/components/products/ProductCard'
+import { ProductGrid } from '@/components/products/ProductGrid'
+import { CategoryPills } from '@/components/products/CategoryPills'
+import HomePage from '@/pages/customer/HomePage'
 
 describe('Catalogue & Store Selection Mock Handlers', () => {
   let server
@@ -11,13 +21,17 @@ describe('Catalogue & Store Selection Mock Handlers', () => {
     server = createMockServer()
   })
 
-  it('returns all products when no storeId is specified', async () => {
+  it('returns all products across all campus stores when no storeId is specified', async () => {
     const products = await server.handle('catalogue.products', {})
-    expect(products.length).toBeGreaterThan(0)
-    expect(products.some((p) => p.id === 'p_milk_500')).toBe(true)
+    expect(products.length).toBe(SAMPLE_PRODUCTS.length)
+    // Products from different stores are all present
+    const storeIds = new Set(products.map((p) => p.storeId))
+    expect(storeIds.has('store_campus_mart')).toBe(true)
+    expect(storeIds.has('store_night_canteen')).toBe(true)
+    expect(storeIds.has('store_stationery_hub')).toBe(true)
   })
 
-  it('filters products by storeId', async () => {
+  it('filters products by storeId when specifically queried for internal store needs', async () => {
     const campusMartProducts = await server.handle('catalogue.products', { storeId: 'store_campus_mart' })
     expect(campusMartProducts.every((p) => p.storeId === 'store_campus_mart')).toBe(true)
     expect(campusMartProducts.some((p) => p.id === 'p_milk_500')).toBe(true)
@@ -38,62 +52,227 @@ describe('Catalogue & Store Selection Mock Handlers', () => {
     expect(stores.length).toBeGreaterThanOrEqual(2)
     const openStore = stores.find((s) => s.id === 'store_campus_mart')
     expect(openStore?.isOpen).toBe(true)
+    const closedStore = stores.find((s) => s.id === 'store_stationery_hub')
+    expect(closedStore?.isOpen).toBe(false)
   })
 })
 
-describe('Catalogue Client-side Filtering & Search Logic', () => {
-  it('filters products by category correctly', () => {
-    const dairyProducts = SAMPLE_PRODUCTS.filter((p) => p.categoryId === 'dairy')
-    expect(dairyProducts.length).toBeGreaterThan(0)
-    expect(dairyProducts.every((p) => p.categoryId === 'dairy')).toBe(true)
-  })
-
-  it('searches products by name, pack, or category', () => {
-    const query = 'milk'
+describe('Product-First Catalogue Discovery & Search', () => {
+  it('searches products across multiple stores simultaneously without selecting a store', () => {
+    // Both Campus Mart and Night Canteen sell noodles
+    const query = 'noodles'
     const results = SAMPLE_PRODUCTS.filter((p) => {
-      const nameMatch = p.name.toLowerCase().includes(query)
-      const packMatch = p.pack?.toLowerCase().includes(query)
+      const q = query.toLowerCase()
+      const nameMatch = p.name.toLowerCase().includes(q)
+      const packMatch = p.pack?.toLowerCase().includes(q)
       return nameMatch || packMatch
     })
-    expect(results.some((p) => p.name.toLowerCase().includes('milk'))).toBe(true)
+
+    expect(results.length).toBeGreaterThanOrEqual(2)
+    const stores = results.map((p) => p.storeId)
+    expect(stores).toContain('store_campus_mart')
+    expect(stores).toContain('store_night_canteen')
   })
 
-  it('handles empty search results cleanly', () => {
-    const query = 'non_existent_gadget_xyz'
+  it('allows category browsing across all stores without requiring prior store selection', () => {
+    // Instant food category has items in Campus Mart and Night Canteen
+    const instantProducts = SAMPLE_PRODUCTS.filter((p) => p.categoryId === 'instant')
+    expect(instantProducts.length).toBeGreaterThanOrEqual(2)
+    expect(instantProducts.some((p) => p.storeId === 'store_campus_mart')).toBe(true)
+    expect(instantProducts.some((p) => p.storeId === 'store_night_canteen')).toBe(true)
+  })
+
+  it('computes category counts across all campus products in CategoryPills', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const html = renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(CategoryPills, {
+          selectedCategory: 'all',
+          onSelectCategory: () => {},
+          products: SAMPLE_PRODUCTS,
+        }),
+      ),
+    )
+
+    // All Products pill has total count
+    expect(html).toContain('All Products')
+    expect(html).toContain(String(SAMPLE_PRODUCTS.length))
+    // Category pill present
+    expect(html).toContain('Milk, eggs &amp; bread')
+  })
+
+  it('handles empty search results cleanly with a reset action', () => {
+    const query = 'unobtainium_widget_999'
     const results = SAMPLE_PRODUCTS.filter((p) => p.name.toLowerCase().includes(query))
     expect(results).toEqual([])
+
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: false,
+        searchQuery: query,
+        selectedCategory: 'all',
+        onResetFilters: () => {},
+      }),
+    )
+
+    expect(html).toContain('No items found')
+    expect(html).toContain('Reset filters')
+    expect(html).not.toContain('for the selected store')
+  })
+
+  it('renders loading skeleton when products are fetching', () => {
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: true,
+      }),
+    )
+
+    expect(html).toContain('Loading product')
+    expect(html).toContain('animate-shimmer')
   })
 })
 
-describe('Cart Store Operations & Stock Management', () => {
+describe('Product-First Cart Operations & Store Identity', () => {
   beforeEach(() => {
     useCartStore.getState().clear()
   })
 
-  it('adds items to the cart and updates quantities', () => {
+  it('adds an item to cart without selecting a store and automatically adopts the product storeId', () => {
     const store = useCartStore.getState()
     expect(store.lines).toEqual([])
+    expect(selectCartStoreId(store)).toBeNull()
 
-    store.setQuantity('p_milk_500', 1)
-    expect(useCartStore.getState().lines).toEqual([{ productId: 'p_milk_500', quantity: 1 }])
+    // Customer directly adds Night Canteen product without selecting store
+    store.setQuantity('p_nc_maggi', 1, 'store_night_canteen')
 
-    store.setQuantity('p_milk_500', 3)
-    expect(useCartStore.getState().lines).toEqual([{ productId: 'p_milk_500', quantity: 3 }])
-
-    store.setQuantity('p_bread', 2)
-    expect(useCartStore.getState().lines.length).toBe(2)
-
-    store.setQuantity('p_milk_500', 0)
-    expect(useCartStore.getState().lines).toEqual([{ productId: 'p_bread', quantity: 2 }])
+    const state = useCartStore.getState()
+    expect(state.lines).toEqual([{ productId: 'p_nc_maggi', quantity: 1 }])
+    expect(state.storeId).toBe('store_night_canteen')
+    expect(selectCartStoreId(state)).toBe('store_night_canteen')
   })
 
-  it('clears all items from the cart', () => {
+  it('clears cart and storeId when all items are removed', () => {
     const store = useCartStore.getState()
-    store.setQuantity('p_milk_500', 2)
-    store.setQuantity('p_bread', 1)
-    expect(useCartStore.getState().lines.length).toBe(2)
+    store.setQuantity('p_milk_500', 2, 'store_campus_mart')
+    expect(useCartStore.getState().storeId).toBe('store_campus_mart')
 
-    store.clear()
+    store.setQuantity('p_milk_500', 0, 'store_campus_mart')
     expect(useCartStore.getState().lines).toEqual([])
+    expect(useCartStore.getState().storeId).toBeNull()
+  })
+
+  it('protects single-store cart integrity by requiring explicit replaceCart to switch stores', () => {
+    const store = useCartStore.getState()
+    store.setQuantity('p_milk_500', 1, 'store_campus_mart')
+    expect(useCartStore.getState().storeId).toBe('store_campus_mart')
+
+    // Switching to Night Canteen via replaceCart
+    store.replaceCart('p_nc_soda', 2, 'store_night_canteen')
+
+    const updated = useCartStore.getState()
+    expect(updated.storeId).toBe('store_night_canteen')
+    expect(updated.lines).toEqual([{ productId: 'p_nc_soda', quantity: 2 }])
+  })
+})
+
+describe('Product Card Store Metadata & Stock Safeguards', () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  const renderCard = (product) =>
+    renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(MemoryRouter, null, React.createElement(ProductCard, { product })),
+      ),
+    )
+
+  beforeEach(() => {
+    useCartStore.getState().clear()
+  })
+
+  it('renders store fulfillment metadata on the product card', () => {
+    const product = SAMPLE_PRODUCTS.find((p) => p.id === 'p_milk_500')
+    const html = renderCard(product)
+
+    expect(html).toContain('Toned Milk')
+    expect(html).toContain('500 ml')
+    expect(html).toContain('Campus Mart')
+  })
+
+  it('displays Store closed badge and disables adding when store is closed', () => {
+    const closedProduct = SAMPLE_PRODUCTS.find((p) => p.id === 'p_stat_notebook') // store_stationery_hub is closed
+    const html = renderCard(closedProduct)
+
+    expect(html).toContain('Store closed')
+    expect(html).toContain('disabled')
+  })
+
+  it('displays Out of stock badge and disables adding when stock is 0', () => {
+    const oosProduct = SAMPLE_PRODUCTS.find((p) => p.id === 'p_maggi') // stock: 0
+    const html = renderCard(oosProduct)
+
+    expect(html).toContain('Out of stock')
+    expect(html).toContain('Unavailable')
+    expect(html).toContain('disabled')
+  })
+
+  it('displays Low Stock badge when stock is 5 or fewer', () => {
+    const lowStockProduct = {
+      ...SAMPLE_PRODUCTS[0],
+      id: 'p_test_low',
+      stock: 3,
+    }
+    const html = renderCard(lowStockProduct)
+    expect(html).toContain('Only')
+    expect(html).toContain('3')
+    expect(html).toContain('left')
+  })
+})
+
+describe('HomePage Product-First Shopping Experience', () => {
+  it('renders customer catalogue without mandatory store selection dropdown or store header', () => {
+    useAuthStore.setState({
+      user: { id: 'usr_test_1', name: 'Devendra Patel', roles: ['customer'], defaultLocationId: 'loc_hostel_b' },
+      token: 'tok_test',
+    })
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    // Seed query cache with sample data
+    queryClient.setQueryData(['products', 'all'], SAMPLE_PRODUCTS)
+    queryClient.setQueryData(['categories'], SAMPLE_CATEGORIES)
+    queryClient.setQueryData(['stores'], SAMPLE_STORES)
+
+    const html = renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(MemoryRouter, null, React.createElement(HomePage)),
+      ),
+    )
+
+    // Customer greeting is present
+    expect(html).toContain('what do you need?')
+    expect(html).toContain('Campus Delivery')
+
+    // Search and categories are immediately available
+    expect(html).toContain('Search milk, bread')
+    expect(html).toContain('All Products')
+
+    // Products from different stores are displayed
+    expect(html).toContain('Toned Milk')
+    expect(html).toContain('Cheese Masala Noodles')
+
+    // MANDATORY STORE SELECTOR IS GONE
+    expect(html).not.toContain('Select store')
+    expect(html).not.toContain('Campus Stores')
+    expect(html).not.toContain('Select a store to view its local inventory')
   })
 })

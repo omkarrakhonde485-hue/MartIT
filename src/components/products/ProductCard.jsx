@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent } from '@/components/ui/Dialog'
 import { useCartStore, selectCartStoreId } from '@/stores/cartStore'
+import { useStores } from '@/hooks/useCatalogue'
 import { ITEM_ILLUSTRATIONS } from '@/components/marketing/Illustrations'
 import { SAMPLE_CATEGORIES } from '@/mocks/categories'
 import { SAMPLE_STORES } from '@/mocks/campus'
@@ -14,7 +15,7 @@ import { spring } from '@/utils/motion'
 
 /**
  * ProductCard with illustration, pack details, stock badges, price with MRP strikethrough,
- * and integrated add-to-cart quantity stepper connected to useCartStore.
+ * non-blocking store metadata, and integrated add-to-cart quantity stepper connected to useCartStore.
  */
 export function ProductCard({ product, className }) {
   const { id, name, pack, price, mrp, stock, art, categoryId, storeId } = product
@@ -23,6 +24,11 @@ export function ProductCard({ product, className }) {
   const replaceCart = useCartStore((s) => s.replaceCart)
   const cartStoreId = useCartStore(selectCartStoreId)
   const cartLines = useCartStore((s) => s.lines)
+
+  const { data: stores = [] } = useStores()
+  const productStore = stores.find((s) => s.id === storeId) || SAMPLE_STORES.find((s) => s.id === storeId)
+  const storeName = productStore?.name?.replace(/\s*\(sample store\)/i, '') || ''
+  const isStoreClosed = productStore ? !productStore.isOpen : false
 
   const [showSwitchStoreDialog, setShowSwitchStoreDialog] = useState(false)
 
@@ -34,15 +40,18 @@ export function ProductCard({ product, className }) {
     return SAMPLE_CATEGORIES.find((c) => c.id === categoryId)
   }, [categoryId])
 
-  const currentStoreName = SAMPLE_STORES.find((s) => s.id === cartStoreId)?.name || 'another store'
-  const newStoreName = SAMPLE_STORES.find((s) => s.id === storeId)?.name || 'this store'
+  const currentStoreName =
+    stores.find((s) => s.id === cartStoreId)?.name ||
+    SAMPLE_STORES.find((s) => s.id === cartStoreId)?.name ||
+    'another store'
+  const newStoreName = productStore?.name || 'this store'
 
   const Art = (art && ITEM_ILLUSTRATIONS[art]) || (category?.art && ITEM_ILLUSTRATIONS[category.art]) || null
   const tint = category?.tint || '#dbeafe'
 
   const handleAdd = (e) => {
     e.stopPropagation()
-    if (isOutOfStock) return
+    if (isOutOfStock || isStoreClosed) return
     if (cartStoreId && storeId && cartStoreId !== storeId && cartLines.length > 0) {
       setShowSwitchStoreDialog(true)
       return
@@ -52,7 +61,7 @@ export function ProductCard({ product, className }) {
 
   const handleIncrement = (e) => {
     e.stopPropagation()
-    if (isMaxQuantity) return
+    if (isMaxQuantity || isStoreClosed) return
     if (cartStoreId && storeId && cartStoreId !== storeId && cartLines.length > 0) {
       setShowSwitchStoreDialog(true)
       return
@@ -76,7 +85,7 @@ export function ProductCard({ product, className }) {
       className={cn(
         'group relative flex flex-col justify-between rounded-card border border-line bg-surface p-3 sm:p-4 shadow-1',
         'transition-[transform,box-shadow,border-color] duration-300 ease-out-soft hover:-translate-y-1 hover:shadow-2 hover:border-line-strong',
-        isOutOfStock && 'opacity-75',
+        (isOutOfStock || isStoreClosed) && 'opacity-85',
         className,
       )}
     >
@@ -98,7 +107,12 @@ export function ProductCard({ product, className }) {
               Out of stock
             </Badge>
           )}
-          {!isOutOfStock && isLowStock && (
+          {!isOutOfStock && isStoreClosed && (
+            <Badge tone="warning" size="sm" className="shadow-1">
+              Store closed
+            </Badge>
+          )}
+          {!isOutOfStock && !isStoreClosed && isLowStock && (
             <Badge tone="warning" size="sm" className="shadow-1">
               Only {stock} left
             </Badge>
@@ -115,11 +129,15 @@ export function ProductCard({ product, className }) {
       <div className="mt-3 flex flex-1 flex-col">
         <div className="flex items-baseline justify-between gap-1">
           <p className="text-xs font-medium text-ink-subtle">{pack}</p>
-          {category && (
+          {storeName ? (
+            <span className="text-[11px] font-medium text-ink-subtle/80 truncate max-w-[120px]" title={storeName}>
+              {storeName}
+            </span>
+          ) : category ? (
             <span className="text-[11px] font-medium text-ink-subtle/80 hidden xs:inline-block">
               {category.name.split('&')[0].trim()}
             </span>
-          )}
+          ) : null}
         </div>
         <h3 className="mt-0.5 line-clamp-2 text-sm sm:text-[15px] font-semibold text-ink leading-snug">
           {name}
@@ -136,6 +154,15 @@ export function ProductCard({ product, className }) {
               className="h-8 rounded-tile border border-line bg-surface-2 px-3 text-xs font-medium text-ink-subtle cursor-not-allowed opacity-70"
             >
               Unavailable
+            </button>
+          ) : isStoreClosed ? (
+            <button
+              type="button"
+              disabled
+              className="h-8 rounded-tile border border-line bg-surface-2 px-3 text-xs font-medium text-ink-subtle cursor-not-allowed opacity-70"
+              title="This store is currently closed"
+            >
+              Store closed
             </button>
           ) : quantity === 0 ? (
             <button

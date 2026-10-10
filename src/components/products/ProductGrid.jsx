@@ -54,8 +54,8 @@ export function ProductGrid({
             {searchQuery
               ? `We couldn't find any products matching "${searchQuery}". Try checking the spelling or searching another term.`
               : selectedCategory !== 'all'
-              ? 'No products available in this category for the selected store.'
-              : 'There are currently no products listed for this store.'}
+              ? 'No products available in this category.'
+              : 'There are currently no products listed in the catalogue.'}
           </p>
           {(searchQuery || selectedCategory !== 'all') && (
             <Button

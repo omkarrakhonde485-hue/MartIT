@@ -463,3 +463,97 @@ describe('Checkout & Order Confirmation Presentation Safeguards', () => {
   })
 })
 
+describe('Product-First Shopping to Checkout End-to-End Integration', () => {
+  let server, token
+
+  beforeEach(async () => {
+    useCartStore.getState().clear()
+    server = createMockServer()
+    token = (await server.handle('auth.demoLogin', { role: 'customer' })).token
+  })
+
+  it('allows end-to-end checkout for products added directly without upfront store selection', async () => {
+    // Customer discovers Night Canteen Maggi directly from product-first catalogue
+    const product = SAMPLE_PRODUCTS.find((p) => p.id === 'p_nc_maggi')
+    expect(product).toBeDefined()
+    expect(product.storeId).toBe('store_night_canteen')
+
+    // Customer adds product without selecting store
+    useCartStore.getState().setQuantity(product.id, 2, product.storeId)
+
+    const cartState = useCartStore.getState()
+    expect(cartState.storeId).toBe('store_night_canteen')
+    expect(selectCartStoreId(cartState)).toBe('store_night_canteen')
+
+    // Order payload uses automatically resolved storeId
+    const orderPayload = {
+      storeId: cartState.storeId,
+      locationId: 'loc_hostel_b',
+      lines: cartState.lines,
+    }
+
+    const order = await server.handle('orders.create', orderPayload, { token })
+
+    expect(order.id).toBeDefined()
+    expect(order.status).toBe('AWAITING_PAYMENT')
+    expect(order.storeId).toBe('store_night_canteen')
+    expect(order.lines).toEqual([
+      { productId: 'p_nc_maggi', name: 'Cheese Masala Noodles', pack: '2 × 70 g', unitPrice: 65, quantity: 2 },
+    ])
+    // Authoritative pricing: 65 * 2 = 130 + delivery fee + platform fee
+    expect(order.pricing.itemSubtotal).toBe(130)
+    expect(order.pricing.deliveryFee).toBeGreaterThanOrEqual(10)
+    expect(order.pricing.platformFee).toBe(0.01)
+    expect(order.pricing.total).toBe(order.pricing.baseAmount + 0.01)
+
+    // Cart is safely cleared after checkout
+    useCartStore.getState().clear()
+    expect(useCartStore.getState().lines).toEqual([])
+    expect(useCartStore.getState().storeId).toBeNull()
+  })
+
+  it('preserves genuine out of stock constraints in product-first checkout', async () => {
+    const oosProduct = SAMPLE_PRODUCTS.find((p) => p.id === 'p_maggi') // stock 0
+    expect(oosProduct.stock).toBe(0)
+
+    useCartStore.getState().setQuantity(oosProduct.id, 1, oosProduct.storeId)
+
+    await expect(
+      server.handle(
+        'orders.create',
+        {
+          storeId: oosProduct.storeId,
+          locationId: 'loc_hostel_a',
+          lines: [{ productId: oosProduct.id, quantity: 1 }],
+        },
+        { token },
+      ),
+    ).rejects.toMatchObject({
+      code: 'OUT_OF_STOCK',
+      status: 409,
+    })
+  })
+
+  it('preserves genuine store closed constraints in product-first checkout', async () => {
+    const closedProduct = SAMPLE_PRODUCTS.find((p) => p.id === 'p_stat_notebook') // store_stationery_hub is closed
+
+    useCartStore.getState().setQuantity(closedProduct.id, 1, closedProduct.storeId)
+
+    await expect(
+      server.handle(
+        'orders.create',
+        {
+          storeId: closedProduct.storeId,
+          locationId: 'loc_hostel_a',
+          lines: [{ productId: closedProduct.id, quantity: 1 }],
+        },
+        { token },
+      ),
+    ).rejects.toMatchObject({
+      code: 'STORE_CLOSED',
+      status: 409,
+    })
+  })
+})
+
+

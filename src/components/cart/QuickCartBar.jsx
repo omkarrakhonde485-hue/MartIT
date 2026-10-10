@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { AnimatePresence, m } from 'motion/react'
 import { ArrowRight, ShoppingBag } from 'lucide-react'
 import { useCartStore, selectCartCount } from '@/stores/cartStore'
+import { useProducts } from '@/hooks/useCatalogue'
 import { Price } from '@/components/ui/Price'
 import { SAMPLE_PRODUCTS } from '@/mocks/catalogue'
 import { spring } from '@/utils/motion'
@@ -14,15 +15,16 @@ import { cn } from '@/utils/cn'
 export function QuickCartBar({ className }) {
   const lines = useCartStore((s) => s.lines)
   const cartCount = useCartStore(selectCartCount)
+  const { data: products = SAMPLE_PRODUCTS } = useProducts()
 
   // Calculate cart subtotal from current catalogue
   const subtotal = useMemo(() => {
     return lines.reduce((sum, line) => {
-      const product = SAMPLE_PRODUCTS.find((p) => p.id === line.productId)
+      const product = products.find((p) => p.id === line.productId) || SAMPLE_PRODUCTS.find((p) => p.id === line.productId)
       const unitPrice = product?.price || 0
       return sum + unitPrice * line.quantity
     }, 0)
-  }, [lines])
+  }, [lines, products])
 
   return (
     <AnimatePresence>

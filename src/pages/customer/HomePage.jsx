@@ -1,8 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Sparkles, X } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
-import { useStores, useProducts } from '@/hooks/useCatalogue'
-import { StoreHeader } from '@/components/products/StoreHeader'
+import { useProducts } from '@/hooks/useCatalogue'
 import { CatalogueSearch } from '@/components/products/CatalogueSearch'
 import { CategoryPills } from '@/components/products/CategoryPills'
 import { ProductGrid } from '@/components/products/ProductGrid'
@@ -14,20 +13,11 @@ export default function HomePage() {
   const user = useAuthStore((s) => s.user)
   const firstName = user?.name?.split(' ')[0] ?? 'there'
 
-  const { data: stores = [], isLoading: isLoadingStores } = useStores()
-  const defaultStoreId = stores[0]?.id || 'store_campus_mart'
-
-  const [selectedStoreId, setSelectedStoreId] = useState(defaultStoreId)
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Active store object
-  const activeStoreId = selectedStoreId || defaultStoreId
-  const currentStore = stores.find((s) => s.id === activeStoreId) || stores[0]
-  const isStoreClosed = currentStore ? !currentStore.isOpen : false
-
-  // Fetch products for selected store
-  const { data: rawProducts = [], isLoading: isLoadingProducts } = useProducts(activeStoreId)
+  // Product-first: fetch all campus catalogue products without requiring store selection
+  const { data: rawProducts = [], isLoading: isLoadingProducts } = useProducts()
 
   // Filter products by category and search
   const filteredProducts = useMemo(() => {
@@ -77,18 +67,6 @@ export default function HomePage() {
             </h1>
           </div>
         </div>
-      </section>
-
-      {/* Store Selector & Delivery Quote */}
-      <section aria-label="Store selection and delivery estimate">
-        <StoreHeader
-          stores={stores}
-          selectedStoreId={activeStoreId}
-          onSelectStore={(id) => {
-            setSelectedStoreId(id)
-            setSelectedCategory('all')
-          }}
-        />
       </section>
 
       {/* Search & Categories Bar */}
@@ -165,8 +143,7 @@ export default function HomePage() {
 
         <ProductGrid
           products={filteredProducts}
-          isLoading={isLoadingProducts || isLoadingStores}
-          isStoreClosed={isStoreClosed}
+          isLoading={isLoadingProducts}
           searchQuery={searchQuery}
           selectedCategory={selectedCategory}
           onResetFilters={handleResetFilters}

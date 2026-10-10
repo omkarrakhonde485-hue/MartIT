@@ -47,7 +47,7 @@ export default function CartPage() {
   const store = stores.find((s) => s.id === effectiveStoreId) || stores[0]
   const isStoreClosed = store ? !store.isOpen : false
 
-  const { data: products = SAMPLE_PRODUCTS, isLoading: isLoadingProducts } = useProducts(effectiveStoreId)
+  const { data: products = SAMPLE_PRODUCTS, isLoading: isLoadingProducts } = useProducts()
   const { data: locations = [] } = useLocations()
 
   // Selected delivery location
