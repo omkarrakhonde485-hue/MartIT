@@ -30,43 +30,75 @@ export function validateEnv(raw = process.env) {
   }
 
   if (nodeEnv === 'production') {
-    const prodSchema = z.object({
-      PORT: z.coerce.number().default(10000),
-      NODE_ENV: z.literal('production'),
-      SUPABASE_URL: z
-        .string({ required_error: 'SUPABASE_URL is required in production' })
-        .url('SUPABASE_URL must be a valid URL')
-        .refine((url) => url.startsWith('https://'), {
-          message: 'SUPABASE_URL must use HTTPS in production',
-        }),
-      SUPABASE_ANON_KEY: z
-        .string({ required_error: 'SUPABASE_ANON_KEY is required in production' })
-        .min(20, 'SUPABASE_ANON_KEY appears too short')
-        .refine((k) => !k.toLowerCase().includes('placeholder') && !k.toLowerCase().includes('test'), {
-          message: 'SUPABASE_ANON_KEY cannot be a placeholder in production',
-        }),
-      SUPABASE_SERVICE_ROLE_KEY: z
-        .string({ required_error: 'SUPABASE_SERVICE_ROLE_KEY is required in production' })
-        .min(20, 'SUPABASE_SERVICE_ROLE_KEY appears too short')
-        .refine((k) => !k.toLowerCase().includes('placeholder') && !k.toLowerCase().includes('test'), {
-          message: 'SUPABASE_SERVICE_ROLE_KEY cannot be a placeholder in production',
-        }),
-      FRONTEND_ORIGINS: z
-        .string({ required_error: 'FRONTEND_ORIGINS is required in production' })
-        .refine(
-          (origins) => {
-            const list = origins.split(',').map((o) => o.trim())
-            return list.length > 0 && !list.includes('*') && !list.some((o) => o.startsWith('http://localhost'))
-          },
-          {
-            message: 'FRONTEND_ORIGINS must be explicit HTTPS production URLs (no wildcard or localhost allowed)',
-          },
-        ),
-      FEATURE_MULTI_STORE_CHECKOUT: z.coerce.boolean().default(false),
-      ROUTING_PROVIDER: z.string().optional().default(''),
-      ROUTING_MODE: z.string().default('walking'),
-      MAKE_VERIFICATION_WEBHOOK_URL: z.string().optional().default(''),
-    })
+    const isPlaceholder = (val) => {
+      if (!val || typeof val !== 'string') return true
+      const lower = val.toLowerCase()
+      const blockedTokens = [
+        'placeholder',
+        'test',
+        'your-project',
+        'your-supabase',
+        'example',
+        'dummy',
+        'sample',
+        'secret',
+        'changeme',
+        'change-me',
+        'dev-anon',
+        'dev-service',
+      ]
+      return blockedTokens.some((token) => lower.includes(token))
+    }
+
+    const prodSchema = z
+      .object({
+        PORT: z.coerce.number().default(10000),
+        NODE_ENV: z.literal('production'),
+        SUPABASE_URL: z
+          .string({ required_error: 'SUPABASE_URL is required in production' })
+          .url('SUPABASE_URL must be a valid URL')
+          .refine((url) => url.startsWith('https://'), {
+            message: 'SUPABASE_URL must use HTTPS in production',
+          })
+          .refine((url) => !isPlaceholder(url), {
+            message: 'SUPABASE_URL cannot be a placeholder or template URL in production',
+          }),
+        SUPABASE_ANON_KEY: z
+          .string({ required_error: 'SUPABASE_ANON_KEY is required in production' })
+          .min(20, 'SUPABASE_ANON_KEY appears too short')
+          .refine((k) => !isPlaceholder(k), {
+            message: 'SUPABASE_ANON_KEY cannot be a placeholder in production',
+          }),
+        SUPABASE_SERVICE_ROLE_KEY: z
+          .string({ required_error: 'SUPABASE_SERVICE_ROLE_KEY is required in production' })
+          .min(20, 'SUPABASE_SERVICE_ROLE_KEY appears too short')
+          .refine((k) => !isPlaceholder(k), {
+            message: 'SUPABASE_SERVICE_ROLE_KEY cannot be a placeholder in production',
+          }),
+        FRONTEND_ORIGINS: z
+          .string({ required_error: 'FRONTEND_ORIGINS is required in production' })
+          .refine(
+            (origins) => {
+              const list = origins.split(',').map((o) => o.trim()).filter(Boolean)
+              return (
+                list.length > 0 &&
+                !list.includes('*') &&
+                list.every((o) => o.startsWith('https://') && !o.includes('localhost') && !o.includes('127.0.0.1'))
+              );
+            },
+            {
+              message: 'FRONTEND_ORIGINS must be explicit HTTPS production URLs (no wildcard or localhost allowed)',
+            },
+          ),
+        FEATURE_MULTI_STORE_CHECKOUT: z.coerce.boolean().default(false),
+        ROUTING_PROVIDER: z.string().optional().default(''),
+        ROUTING_MODE: z.string().default('walking'),
+        MAKE_VERIFICATION_WEBHOOK_URL: z.string().optional().default(''),
+      })
+      .refine((data) => data.SUPABASE_ANON_KEY !== data.SUPABASE_SERVICE_ROLE_KEY, {
+        message: 'SUPABASE_SERVICE_ROLE_KEY must not be identical to SUPABASE_ANON_KEY',
+        path: ['SUPABASE_SERVICE_ROLE_KEY'],
+      })
 
     return prodSchema.parse(raw)
   }

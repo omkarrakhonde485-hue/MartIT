@@ -6,6 +6,7 @@
 export const ROLES = Object.freeze({
   CUSTOMER: 'customer',
   RUNNER: 'runner',
+  STORE_OWNER: 'store_owner',
   ADMIN: 'admin',
   SUPER_ADMIN: 'super_admin',
 })
@@ -26,6 +27,7 @@ const P = PERMISSIONS
 const ROLE_PERMISSIONS = {
   [ROLES.CUSTOMER]: [P.SHOP],
   [ROLES.RUNNER]: [P.RUNNER_DELIVER],
+  [ROLES.STORE_OWNER]: [P.SHOP],
   [ROLES.ADMIN]: [P.ADMIN_ACCESS, P.USERS_READ, P.RUNNERS_APPROVE, P.ORDERS_READ_ALL],
   [ROLES.SUPER_ADMIN]: Object.values(P),
 }

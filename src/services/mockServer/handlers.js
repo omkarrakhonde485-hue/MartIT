@@ -243,27 +243,58 @@ export function createMockServer({ routingProvider = null } = {}) {
         throw new ApiError('FORBIDDEN', 'You do not have permission to view this order.', 403)
       }
 
-      // Server-authoritative expiry check
+      // Strictly read-only query: does NOT mutate payment state on GET
       const now = Date.now()
-      if (
-        order.paymentStatus === PAYMENT_STATUS.PENDING ||
-        order.paymentStatus === PAYMENT_STATUS.PROCESSING
-      ) {
-        if (order.payment?.windowExpiresAt && now >= order.payment.windowExpiresAt) {
-          order.paymentStatus = transitionPayment(
-            order.paymentStatus,
-            PAYMENT_STATUS.EXPIRED,
-            PAYMENT_SOURCE.SYSTEM_TIMER,
-          )
-          if (order.payment) {
-            order.payment.status = PAYMENT_STATUS.EXPIRED
-          }
-          db.saveOrders?.()
-        }
-      }
+      const isWindowExpired = Boolean(
+        order.payment?.windowExpiresAt && now >= order.payment.windowExpiresAt,
+      )
 
       const { ledger: _ledger, ...customerView } = order
-      return customerView
+      return {
+        ...customerView,
+        isWindowExpired,
+      }
+    },
+
+    /**
+     * Dedicated atomic payment expiration endpoint.
+     */
+    'orders.expire': ({ orderId }, { token }) => {
+      const user = requireUser(token)
+      if (!orderId) throw new ApiError('INVALID_ORDER_ID', 'Order reference is required.', 400)
+      const order = db.orders.find((o) => o.id === orderId)
+      if (!order) throw new ApiError('ORDER_NOT_FOUND', 'Order not found.', 404)
+
+      const isOwner = order.customerId === user.id
+      const hasStaffAccess =
+        user.roles.includes(ROLES.ADMIN) || user.roles.includes(ROLES.SUPER_ADMIN)
+
+      if (!isOwner && !hasStaffAccess) {
+        throw new ApiError('FORBIDDEN', "You do not have permission to expire this order's payment.", 403)
+      }
+
+      if (order.paymentStatus === PAYMENT_STATUS.PAID) {
+        throw new ApiError('ALREADY_PAID', 'Cannot expire an order that is already paid.', 409)
+      }
+
+      order.paymentStatus = transitionPayment(
+        order.paymentStatus,
+        PAYMENT_STATUS.EXPIRED,
+        PAYMENT_SOURCE.SYSTEM_TIMER,
+      )
+      if (order.payment) {
+        order.payment.status = PAYMENT_STATUS.EXPIRED
+      }
+      order.status = transitionOrder(order.status, ORDER_STATUS.CANCELLED)
+      db.saveOrders?.()
+
+      const { ledger: _ledger, ...customerView } = order
+      return {
+        order: customerView,
+        status: 'expired',
+        paymentStatus: PAYMENT_STATUS.EXPIRED,
+        message: 'Order payment successfully expired and cancelled.',
+      }
     },
 
     /**
@@ -296,6 +327,19 @@ export function createMockServer({ routingProvider = null } = {}) {
         }
       }
 
+      // Terminal state guard: EXPIRED, FAILED cannot be overwritten
+      if (
+        order.paymentStatus === PAYMENT_STATUS.EXPIRED ||
+        order.paymentStatus === PAYMENT_STATUS.FAILED
+      ) {
+        return {
+          order: customerView,
+          status: 'expired',
+          paymentStatus: order.paymentStatus,
+          message: 'Payment verification window has expired or order was cancelled.',
+        }
+      }
+
       const now = Date.now()
 
       // Server-authoritative window expiry check
@@ -309,6 +353,7 @@ export function createMockServer({ routingProvider = null } = {}) {
           if (order.payment) {
             order.payment.status = PAYMENT_STATUS.EXPIRED
           }
+          order.status = transitionOrder(order.status, ORDER_STATUS.CANCELLED)
           db.saveOrders?.()
         }
         const { ledger: _l, ...updatedView } = order

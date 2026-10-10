@@ -156,4 +156,33 @@ describe('Authentication & Authorization Endpoints', () => {
     expect(res.status).toBe(403)
     expect(res.body.code).toBe('FORBIDDEN')
   })
+
+  it('blocks regular admin from assigning roles (only super_admin has ROLES_ASSIGN) with 403', async () => {
+    const res = await request(app)
+      .post('/admin/roles/set')
+      .set('Authorization', 'Bearer tok_admin')
+      .send({ userId: 'usr_customer', role: ROLES.ADMIN, granted: true })
+
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('FORBIDDEN')
+  })
+
+  it('allows super admin to grant admin role to customer', async () => {
+    const res = await request(app)
+      .post('/admin/roles/set')
+      .set('Authorization', 'Bearer tok_super')
+      .send({ userId: 'usr_customer', role: ROLES.ADMIN, granted: true })
+
+    expect(res.status).toBe(200)
+    expect(res.body.granted).toBe(true)
+  })
+
+  it('blocks runner from accessing admin console with 403', async () => {
+    const res = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', 'Bearer tok_runner')
+
+    expect(res.status).toBe(403)
+    expect(res.body.code).toBe('FORBIDDEN')
+  })
 })

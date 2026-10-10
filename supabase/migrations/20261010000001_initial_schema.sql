@@ -12,6 +12,7 @@ CREATE EXTENSION IF NOT EXISTS "citext";
 CREATE TYPE role_enum AS ENUM (
   'customer',
   'runner',
+  'store_owner',
   'admin',
   'super_admin'
 );
@@ -141,7 +142,8 @@ CREATE TABLE products (
   is_available BOOLEAN NOT NULL DEFAULT TRUE,
   image_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_product_store UNIQUE (id, store_id)
 );
 
 CREATE INDEX idx_products_store ON products(store_id);
@@ -262,6 +264,9 @@ CREATE TABLE order_items (
   -- Strict Relational Integrity: Item MUST belong to the exact same order & store as its group
   CONSTRAINT fk_item_fulfillment_group FOREIGN KEY (fulfillment_group_id, order_id, store_id)
     REFERENCES order_fulfillment_groups(id, order_id, store_id) ON DELETE CASCADE,
+  -- Item product MUST belong to the same store
+  CONSTRAINT fk_item_product_store FOREIGN KEY (product_id, store_id)
+    REFERENCES products(id, store_id) ON DELETE RESTRICT,
   CONSTRAINT chk_line_subtotal CHECK (line_subtotal = unit_price * quantity)
 );
 
@@ -306,6 +311,11 @@ CREATE TABLE platform_fee_reservations (
   paid_at TIMESTAMPTZ
 );
 
+-- Invariant: Order fee_paise must correspond to a valid dynamic platform fee reservation slot
+ALTER TABLE orders
+  ADD CONSTRAINT fk_orders_platform_fee_slot
+  FOREIGN KEY (fee_paise) REFERENCES platform_fee_reservations(fee_paise);
+
 -- ============================================================================
 -- 9. PAYMENT RECORDS & AUDIT LOGS
 -- ============================================================================
@@ -339,14 +349,45 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_logs_actor ON audit_logs(actor_id);
 CREATE INDEX idx_audit_logs_action ON audit_logs(action);
 
--- Trigger for auto-updating updated_at
+-- Function & Trigger: Validate payment record amount against parent order total_payable
+CREATE OR REPLACE FUNCTION verify_payment_record_amount()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_order_total NUMERIC(10, 2);
+BEGIN
+  SELECT total_payable INTO v_order_total
+  FROM public.orders
+  WHERE id = NEW.order_id;
+
+  IF v_order_total IS NOT NULL AND NEW.amount <> v_order_total THEN
+    RAISE EXCEPTION 'PAYMENT_AMOUNT_MISMATCH'
+      USING HINT = 'Payment record amount must exactly match the parent order total_payable.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_verify_payment_record_amount
+  BEFORE INSERT OR UPDATE ON payment_records
+  FOR EACH ROW EXECUTE FUNCTION verify_payment_record_amount();
+
+-- Trigger for auto-updating updated_at with explicit search_path
 CREATE OR REPLACE FUNCTION set_updated_at()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER trg_profiles_updated_at BEFORE UPDATE ON profiles
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -365,3 +406,7 @@ CREATE TRIGGER trg_orders_updated_at BEFORE UPDATE ON orders
 
 CREATE TRIGGER trg_order_fulfillment_groups_updated_at BEFORE UPDATE ON order_fulfillment_groups
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Revoke direct execution of trigger functions
+REVOKE EXECUTE ON FUNCTION verify_payment_record_amount() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION set_updated_at() FROM PUBLIC, anon, authenticated;

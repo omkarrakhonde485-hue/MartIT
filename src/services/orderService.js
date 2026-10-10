@@ -23,6 +23,11 @@ export const orderService = {
   checkPayment: (orderId) => request('orders.checkPayment', { orderId }),
 
   /**
+   * Dedicated atomic payment expiration for an order.
+   */
+  expire: (orderId) => request('orders.expire', { orderId }),
+
+  /**
    * Explicitly retries payment for an expired order by allocating a new dynamic platform fee.
    */
   retryPayment: (orderId) => request('orders.retryPayment', { orderId }),
