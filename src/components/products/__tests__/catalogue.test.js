@@ -14,6 +14,7 @@ import { ProductGrid } from '@/components/products/ProductGrid'
 import { CategoryPills } from '@/components/products/CategoryPills'
 import * as authStoreModule from '@/stores/authStore'
 import { StoreHeader } from '@/components/products/StoreHeader'
+import { CatalogueSearch } from '@/components/products/CatalogueSearch'
 import * as deliveryQuoteModule from '@/hooks/useDeliveryQuote'
 import HomePage from '@/pages/customer/HomePage'
 
@@ -380,6 +381,263 @@ describe('StoreHeader Delivery Radius Error Handling', () => {
       quoteSpy.mockRestore()
       authSpy.mockRestore()
     }
+  })
+})
+
+describe('Catalogue Loading, Error, Empty, and Populated States', () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  it('renders loading skeleton when products are fetching', () => {
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: true,
+      }),
+    )
+    expect(html).toContain('Loading product')
+    expect(html).toContain('animate-shimmer')
+  })
+
+  it('renders structured error state with retry button when catalogue fetching fails', () => {
+    const retryFn = vi.fn()
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: false,
+        isError: true,
+        error: new Error('Failed to load campus catalogue items'),
+        onRetry: retryFn,
+      }),
+    )
+
+    expect(html).toContain('Unable to load catalogue')
+    expect(html).toContain('Failed to load campus catalogue items')
+    expect(html).toContain('Try again')
+  })
+
+  it('renders default user-friendly error message if error object lacks a message', () => {
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: false,
+        isError: true,
+        error: null,
+      }),
+    )
+
+    expect(html).toContain('Unable to load catalogue')
+    expect(html).toContain('Something went wrong while loading campus products')
+  })
+
+  it('renders empty state when search produces no matching items', () => {
+    const resetFn = vi.fn()
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: false,
+        isError: false,
+        searchQuery: 'nonexistent_gadget',
+        selectedCategory: 'all',
+        onResetFilters: resetFn,
+      }),
+    )
+
+    expect(html).toContain('No items found')
+    expect(html).toContain('nonexistent_gadget')
+    expect(html).toContain('Reset filters')
+  })
+
+  it('renders empty state when selected category has no items', () => {
+    const html = renderToString(
+      React.createElement(ProductGrid, {
+        products: [],
+        isLoading: false,
+        isError: false,
+        searchQuery: '',
+        selectedCategory: 'custom_empty_cat',
+        onResetFilters: () => {},
+      }),
+    )
+
+    expect(html).toContain('No items found')
+    expect(html).toContain('No products available in this category')
+  })
+
+  it('renders populated grid of product cards when products are available', () => {
+    const html = renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(
+          MemoryRouter,
+          null,
+          React.createElement(ProductGrid, {
+            products: SAMPLE_PRODUCTS.slice(0, 4),
+            isLoading: false,
+            isError: false,
+          }),
+        ),
+      ),
+    )
+
+    expect(html).toContain('Toned Milk')
+    expect(html).toContain('Farm Fresh Eggs')
+    expect(html).toContain('Whole Wheat Bread')
+  })
+})
+
+describe('Advanced Search Normalization & Edge Cases', () => {
+  it('handles case-insensitive search queries', () => {
+    const qUpper = 'TONED MILK'
+    const terms = qUpper.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const matches = SAMPLE_PRODUCTS.filter((p) => {
+      const text = `${p.name} ${p.pack || ''}`.toLowerCase()
+      return terms.every((t) => text.includes(t))
+    })
+    expect(matches.length).toBeGreaterThanOrEqual(1)
+    expect(matches[0].id).toBe('p_milk_500')
+  })
+
+  it('handles multiple leading, trailing, and internal spaces gracefully', () => {
+    const qMessy = '   toned     milk    '
+    const terms = qMessy.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    expect(terms).toEqual(['toned', 'milk'])
+
+    const matches = SAMPLE_PRODUCTS.filter((p) => {
+      const text = `${p.name} ${p.pack || ''}`.toLowerCase()
+      return terms.every((t) => text.includes(t))
+    })
+    expect(matches.length).toBeGreaterThanOrEqual(1)
+    expect(matches[0].id).toBe('p_milk_500')
+  })
+
+  it('matches across product name and pack size simultaneously', () => {
+    // "milk 500" should match "Toned Milk" (500 ml)
+    const qCross = 'milk 500'
+    const terms = qCross.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const matches = SAMPLE_PRODUCTS.filter((p) => {
+      const text = `${p.name} ${p.pack || ''}`.toLowerCase()
+      return terms.every((t) => text.includes(t))
+    })
+    expect(matches.some((p) => p.id === 'p_milk_500')).toBe(true)
+  })
+
+  it('matches products by store name when searching store keywords', () => {
+    const qStore = 'Night Canteen'
+    const terms = qStore.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const matches = SAMPLE_PRODUCTS.filter((p) => {
+      const storeObj = SAMPLE_STORES.find((s) => s.id === p.storeId)
+      const text = `${p.name} ${p.pack || ''} ${storeObj?.name || ''}`.toLowerCase()
+      return terms.every((t) => text.includes(t))
+    })
+    expect(matches.length).toBeGreaterThanOrEqual(2)
+    expect(matches.every((p) => p.storeId === 'store_night_canteen')).toBe(true)
+  })
+
+  it('CatalogueSearch component renders accessible input with WebKit cancel button suppressed and Escape handling', () => {
+    const clearFn = vi.fn()
+    const html = renderToString(
+      React.createElement(CatalogueSearch, {
+        id: 'test-search-id',
+        value: 'noodles',
+        onChange: () => {},
+        onClear: clearFn,
+      }),
+    )
+
+    expect(html).toContain('id="test-search-id"')
+    expect(html).toContain('aria-label="Search catalogue products"')
+    expect(html).toContain('aria-label="Clear search"')
+    expect(html).toContain('[&amp;::-webkit-search-cancel-button]:hidden')
+    expect(html).toContain('focus-visible:ring-brand')
+  })
+})
+
+describe('Category Filters Interactivity & Combinations', () => {
+  it('combines category selection and search query with proper intersection', () => {
+    // Category: instant meals
+    const instantCategoryProducts = SAMPLE_PRODUCTS.filter((p) => p.categoryId === 'instant')
+    expect(instantCategoryProducts.length).toBeGreaterThan(1)
+
+    // Search: "cheese"
+    const searchTerms = ['cheese']
+    const combined = instantCategoryProducts.filter((p) => {
+      const text = `${p.name} ${p.pack || ''}`.toLowerCase()
+      return searchTerms.every((t) => text.includes(t))
+    })
+
+    expect(combined.length).toBe(1)
+    expect(combined[0].id).toBe('p_nc_maggi')
+    expect(combined[0].name).toContain('Cheese')
+  })
+
+  it('CategoryPills renders aria-pressed and focus-visible indicators', () => {
+    const html = renderToString(
+      React.createElement(CategoryPills, {
+        selectedCategory: 'dairy',
+        onSelectCategory: () => {},
+        products: SAMPLE_PRODUCTS,
+        categories: SAMPLE_CATEGORIES,
+      }),
+    )
+
+    expect(html).toContain('aria-pressed="true"')
+    expect(html).toContain('focus-visible:ring-brand')
+    expect(html).toContain('Milk, eggs &amp; bread')
+  })
+})
+
+describe('ProductCard Stock Limits, Accessibility & Interactive Safeguards', () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  const renderCard = (product, quantity) =>
+    renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(MemoryRouter, null, React.createElement(ProductCard, { product, quantity })),
+      ),
+    )
+
+  beforeEach(() => {
+    useCartStore.getState().clear()
+  })
+
+  it('displays ₹X OFF badge when mrp > price', () => {
+    const discountedProduct = SAMPLE_PRODUCTS.find((p) => p.id === 'p_eggs') // mrp: 58, price: 52
+    const html = renderCard(discountedProduct)
+    expect(html).toContain('OFF')
+    expect(html).toContain('6')
+  })
+
+  it('does not display ₹X OFF badge when mrp equals price', () => {
+    const fullPriceProduct = SAMPLE_PRODUCTS.find((p) => p.id === 'p_milk_500') // mrp: 28, price: 28
+    const html = renderCard(fullPriceProduct)
+    expect(html).not.toContain('OFF')
+  })
+
+  it('disables increment button with title and aria-disabled when cart quantity reaches available stock', () => {
+    const singleStockProduct = {
+      ...SAMPLE_PRODUCTS[0],
+      stock: 1,
+    }
+
+    // Set quantity in cart to match max stock
+    useCartStore.setState({
+      storeId: singleStockProduct.storeId,
+      lines: [{ productId: singleStockProduct.id, quantity: 1 }],
+    })
+
+    const html = renderCard(singleStockProduct, 1)
+    expect(html).toContain('aria-disabled="true"')
+    expect(html).toContain('Maximum available stock (1) reached')
+    expect(html).toContain('opacity-40 cursor-not-allowed')
+  })
+
+  it('includes accessible focus-visible rings on add and quantity buttons', () => {
+    const product = SAMPLE_PRODUCTS.find((p) => p.id === 'p_milk_500')
+    const html = renderCard(product)
+    expect(html).toContain('focus-visible:ring-brand')
   })
 })
 

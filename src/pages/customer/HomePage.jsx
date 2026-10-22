@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react'
 import { Sparkles, X } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
-import { useProducts } from '@/hooks/useCatalogue'
+import { useProducts, useStores, useCategories } from '@/hooks/useCatalogue'
 import { CatalogueSearch } from '@/components/products/CatalogueSearch'
 import { CategoryPills } from '@/components/products/CategoryPills'
 import { ProductGrid } from '@/components/products/ProductGrid'
 import { QuickCartBar } from '@/components/cart/QuickCartBar'
 import { Badge } from '@/components/ui/Badge'
 import { SAMPLE_CATEGORIES } from '@/mocks/categories'
+import { SAMPLE_STORES } from '@/mocks/campus'
 
 export default function HomePage() {
   const user = useAuthStore((s) => s.user)
@@ -17,7 +18,16 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('')
 
   // Product-first: fetch all campus catalogue products without requiring store selection
-  const { data: rawProducts = [], isLoading: isLoadingProducts } = useProducts()
+  const {
+    data: rawProducts = [],
+    isLoading: isLoadingProducts,
+    isError: isProductsError,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useProducts()
+
+  const { data: stores = SAMPLE_STORES } = useStores()
+  const { data: categories = SAMPLE_CATEGORIES } = useCategories()
 
   // Filter products by category and search
   const filteredProducts = useMemo(() => {
@@ -29,29 +39,29 @@ export default function HomePage() {
     }
 
     // Filter by Search Query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim()
+    const normalizedQuery = searchQuery.trim().toLowerCase()
+    if (normalizedQuery) {
+      const terms = normalizedQuery.split(/\s+/).filter(Boolean)
       result = result.filter((p) => {
-        const nameMatch = p.name.toLowerCase().includes(q)
-        const packMatch = p.pack?.toLowerCase().includes(q)
-        const catObj = SAMPLE_CATEGORIES.find((c) => c.id === p.categoryId)
-        const catMatch = catObj?.name.toLowerCase().includes(q)
-        return nameMatch || packMatch || catMatch
+        const catObj = categories.find((c) => c.id === p.categoryId) || SAMPLE_CATEGORIES.find((c) => c.id === p.categoryId)
+        const storeObj = stores.find((s) => s.id === p.storeId) || SAMPLE_STORES.find((s) => s.id === p.storeId)
+        const searchableText = `${p.name} ${p.pack || ''} ${catObj?.name || ''} ${storeObj?.name || ''}`.toLowerCase()
+        return terms.every((term) => searchableText.includes(term))
       })
     }
 
     return result
-  }, [rawProducts, selectedCategory, searchQuery])
+  }, [rawProducts, selectedCategory, searchQuery, categories, stores])
 
   const handleResetFilters = () => {
     setSelectedCategory('all')
     setSearchQuery('')
   }
 
-  const selectedCategoryName = SAMPLE_CATEGORIES.find((c) => c.id === selectedCategory)?.name
+  const selectedCategoryName = (categories.find((c) => c.id === selectedCategory) || SAMPLE_CATEGORIES.find((c) => c.id === selectedCategory))?.name
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8 space-y-6">
+    <div className="mx-auto max-w-6xl px-4 pt-6 pb-32 md:px-6 md:pt-8 md:pb-20 space-y-6">
       {/* Greeting & Header Banner */}
       <section aria-labelledby="catalogue-heading" className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -73,6 +83,7 @@ export default function HomePage() {
       <section aria-label="Search and category filters" className="space-y-3">
         <div className="flex flex-col sm:flex-row gap-3">
           <CatalogueSearch
+            id="catalogue-search-input"
             value={searchQuery}
             onChange={setSearchQuery}
             onClear={() => setSearchQuery('')}
@@ -85,6 +96,7 @@ export default function HomePage() {
           selectedCategory={selectedCategory}
           onSelectCategory={setSelectedCategory}
           products={rawProducts}
+          categories={categories}
         />
 
         {/* Active Filter Chips */}
@@ -98,7 +110,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => setSelectedCategory('all')}
                   aria-label="Remove category filter"
-                  className="rounded-full p-0.5 hover:bg-line text-ink-subtle hover:text-ink"
+                  className="rounded-full p-0.5 hover:bg-line text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                   <X className="size-3" />
                 </button>
@@ -111,7 +123,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => setSearchQuery('')}
                   aria-label="Clear search query"
-                  className="rounded-full p-0.5 hover:bg-line text-ink-subtle hover:text-ink"
+                  className="rounded-full p-0.5 hover:bg-line text-ink-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                   <X className="size-3" />
                 </button>
@@ -120,7 +132,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={handleResetFilters}
-              className="text-xs font-semibold text-brand underline-offset-4 hover:underline ml-1"
+              className="text-xs font-semibold text-brand underline-offset-4 hover:underline ml-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-sm"
             >
               Clear all
             </button>
@@ -144,6 +156,9 @@ export default function HomePage() {
         <ProductGrid
           products={filteredProducts}
           isLoading={isLoadingProducts}
+          isError={isProductsError}
+          error={productsError}
+          onRetry={() => refetchProducts()}
           searchQuery={searchQuery}
           selectedCategory={selectedCategory}
           onResetFilters={handleResetFilters}

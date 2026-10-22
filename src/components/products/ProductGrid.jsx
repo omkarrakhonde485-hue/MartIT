@@ -1,5 +1,5 @@
 import { AnimatePresence, m } from 'motion/react'
-import { AlertTriangle, PackageSearch, RefreshCw } from 'lucide-react'
+import { AlertCircle, AlertTriangle, PackageSearch, RefreshCw } from 'lucide-react'
 import { ProductCard } from './ProductCard'
 import { ProductCardSkeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
@@ -7,11 +7,14 @@ import { spring } from '@/utils/motion'
 import { cn } from '@/utils/cn'
 
 /**
- * Responsive ProductGrid with loading skeletons, empty states, and store closed notices.
+ * Responsive ProductGrid with loading skeletons, error handling, empty states, and store closed notices.
  */
 export function ProductGrid({
   products = [],
   isLoading = false,
+  isError = false,
+  error = null,
+  onRetry,
   isStoreClosed = false,
   searchQuery = '',
   selectedCategory = 'all',
@@ -24,6 +27,30 @@ export function ProductGrid({
         {Array.from({ length: 8 }).map((_, i) => (
           <ProductCardSkeleton key={i} />
         ))}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-card border border-rose-500/30 bg-rose-500/5 py-16 px-4 text-center">
+        <div className="grid size-14 place-items-center rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400">
+          <AlertCircle className="size-7" aria-hidden="true" />
+        </div>
+        <h3 className="mt-4 font-display text-lg font-bold text-ink">Unable to load catalogue</h3>
+        <p className="mt-1.5 max-w-sm text-sm text-ink-muted">
+          {error?.message || 'Something went wrong while loading campus products. Please check your connection and try again.'}
+        </p>
+        {onRetry && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onRetry}
+            className="mt-5 gap-1.5 shadow-1"
+          >
+            <RefreshCw className="size-3.5" aria-hidden="true" /> Try again
+          </Button>
+        )}
       </div>
     )
   }

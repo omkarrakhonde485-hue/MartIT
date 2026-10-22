@@ -10,6 +10,7 @@ export function CategoryPills({
   selectedCategory,
   onSelectCategory,
   products = [],
+  categories = SAMPLE_CATEGORIES,
   className,
 }) {
   // Compute counts per category for the current store's products
@@ -24,7 +25,7 @@ export function CategoryPills({
 
   const allCategories = [
     { id: 'all', name: 'All Products', count: totalCount },
-    ...SAMPLE_CATEGORIES.map((cat) => ({
+    ...categories.map((cat) => ({
       ...cat,
       count: categoryCounts[cat.id] || 0,
     })),
@@ -48,6 +49,7 @@ export function CategoryPills({
                 onClick={() => onSelectCategory(cat.id)}
                 className={cn(
                   'group relative flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors select-none',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2',
                   isSelected ? 'text-brand-ink font-semibold' : 'text-ink-muted hover:text-ink hover:bg-surface-2 bg-surface border border-line',
                 )}
               >

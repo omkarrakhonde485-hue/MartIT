@@ -17,9 +17,10 @@ import { spring } from '@/utils/motion'
  * ProductCard with illustration, pack details, stock badges, price with MRP strikethrough,
  * non-blocking store metadata, and integrated add-to-cart quantity stepper connected to useCartStore.
  */
-export function ProductCard({ product, className }) {
+export function ProductCard({ product, quantity: quantityProp, className }) {
   const { id, name, pack, price, mrp, stock, art, categoryId, storeId } = product
-  const quantity = useCartStore((s) => s.lines.find((l) => l.productId === id)?.quantity ?? 0)
+  const cartQuantity = useCartStore((s) => s.lines.find((l) => l.productId === id)?.quantity ?? 0)
+  const quantity = quantityProp !== undefined ? quantityProp : cartQuantity
   const setQuantity = useCartStore((s) => s.setQuantity)
   const replaceCart = useCartStore((s) => s.replaceCart)
   const cartStoreId = useCartStore(selectCartStoreId)
@@ -151,6 +152,7 @@ export function ProductCard({ product, className }) {
             <button
               type="button"
               disabled
+              aria-label={`${name} - Out of stock`}
               className="h-8 rounded-tile border border-line bg-surface-2 px-3 text-xs font-medium text-ink-subtle cursor-not-allowed opacity-70"
             >
               Unavailable
@@ -159,6 +161,7 @@ export function ProductCard({ product, className }) {
             <button
               type="button"
               disabled
+              aria-label={`${name} - Store closed`}
               className="h-8 rounded-tile border border-line bg-surface-2 px-3 text-xs font-medium text-ink-subtle cursor-not-allowed opacity-70"
               title="This store is currently closed"
             >
@@ -173,6 +176,7 @@ export function ProductCard({ product, className }) {
                 'h-8.5 rounded-tile border-2 border-brand/80 bg-surface px-3.5 text-xs font-bold text-brand',
                 'transition-[background-color,border-color,color,transform] duration-200 ease-out-soft',
                 'hover:bg-brand hover:text-white active:scale-95 shadow-1',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2',
               )}
             >
               + Add
@@ -187,7 +191,7 @@ export function ProductCard({ product, className }) {
                 type="button"
                 onClick={handleDecrement}
                 aria-label={`Decrease ${name} quantity`}
-                className="grid size-6 place-items-center rounded-[6px] hover:bg-white/20 active:scale-90 transition-transform"
+                className="grid size-6 place-items-center rounded-[6px] hover:bg-white/20 active:scale-90 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 <Minus className="size-3.5" aria-hidden="true" />
               </button>
@@ -199,8 +203,10 @@ export function ProductCard({ product, className }) {
                 onClick={handleIncrement}
                 disabled={isMaxQuantity}
                 aria-label={`Increase ${name} quantity`}
+                aria-disabled={isMaxQuantity}
+                title={isMaxQuantity ? `Maximum available stock (${stock}) reached` : undefined}
                 className={cn(
-                  'grid size-6 place-items-center rounded-[6px] transition-transform',
+                  'grid size-6 place-items-center rounded-[6px] transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
                   isMaxQuantity ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/20 active:scale-90',
                 )}
               >
