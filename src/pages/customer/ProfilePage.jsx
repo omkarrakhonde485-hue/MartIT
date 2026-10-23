@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card'
 import { toast } from '@/components/ui/Toaster'
 import { useAuthStore } from '@/stores/authStore'
 import { hasPermission, PERMISSIONS } from '@/utils/permissions'
+import { SavedLocationsCard } from '@/components/customer/SavedLocationsCard'
 
 export default function ProfilePage() {
   const userFromHook = useAuthStore((s) => s.user)
@@ -67,6 +68,9 @@ export default function ProfilePage() {
           )}
         </div>
       </Card>
+
+      {/* Saved Delivery Spots Section */}
+      <SavedLocationsCard />
 
       {/* Mode Switching & Runner Status Card */}
       <Card className="mt-6 p-6">
