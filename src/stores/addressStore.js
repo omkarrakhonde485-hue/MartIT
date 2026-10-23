@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { zustandSafeStorage } from '@/utils/storage'
 import { PRESET_CAMPUS_LOCATIONS } from '@/utils/checkoutValidation'
+import { useAuthStore } from '@/stores/authStore'
 
 export const ADDRESS_STORAGE_KEY = 'martit-saved-addresses'
 
@@ -106,9 +107,10 @@ export function formatSavedLocation(spot) {
 
 /**
  * Recovers, sanitizes, and normalizes persisted location records from client storage.
+ * Enforces user ownership when expectedUserId is provided.
  * Gracefully handles non-arrays, missing IDs/labels, corrupted items, and conflicting defaults.
  */
-export function sanitizeStoredLocations(rawList) {
+export function sanitizeStoredLocations(rawList, expectedUserId = null) {
   if (!Array.isArray(rawList)) return []
 
   const valid = []
@@ -118,8 +120,14 @@ export function sanitizeStoredLocations(rawList) {
     if (!item.label || typeof item.label !== 'string') continue
     if (!item.campusLocation || typeof item.campusLocation !== 'string') continue
 
+    // If expectedUserId is specified, prevent cross-user leakage
+    if (expectedUserId && item.userId && item.userId !== expectedUserId) {
+      continue
+    }
+
     valid.push({
       id: String(item.id),
+      userId: item.userId ? String(item.userId) : expectedUserId || undefined,
       label: String(item.label).trim(),
       campusLocation: String(item.campusLocation).trim(),
       customBuilding: item.customBuilding ? String(item.customBuilding).trim() : '',
@@ -153,20 +161,67 @@ export function sanitizeStoredLocations(rawList) {
   return valid
 }
 
+const getInitialUserId = () => useAuthStore?.getState?.()?.user?.id || null
+
 /**
- * Isolated customer address store with deterministic client persistence.
+ * Account-isolated customer address store with deterministic client persistence.
+ * Each authenticated user can access only their own saved locations.
  */
 export const useAddressStore = create(
   persist(
     (set, get) => ({
+      activeUserId: getInitialUserId(),
       locations: [],
+      locationsByUser: {},
       isLoading: false,
 
       /**
-       * Adds a new validated delivery spot.
-       * If marked as default or if it's the only spot, enforces single-default invariant.
+       * Resolves the current authoritative active user ID from authStore or store.
+       * Synchronizes store state if an auth session transition occurred.
+       */
+      resolveActiveUserId() {
+        const authUser = useAuthStore?.getState?.()?.user
+        const authUserId = authUser?.id ? String(authUser.id) : null
+        if (!authUserId) {
+          if (get().activeUserId !== null) {
+            set({ activeUserId: null, locations: [] })
+          }
+          return null
+        }
+        if (get().activeUserId !== authUserId) {
+          get().setActiveUser(authUserId)
+        }
+        return authUserId
+      },
+
+      /**
+       * Switches active user session.
+       * Immediately isolates and exposes only the active user's locations.
+       * When userId is null (logout or unauthenticated), clears in-memory locations to [].
+       */
+      setActiveUser(userId) {
+        const cleanUserId = userId ? String(userId) : null
+        set((state) => {
+          const userLocations =
+            cleanUserId && state.locationsByUser[cleanUserId]
+              ? sanitizeStoredLocations(state.locationsByUser[cleanUserId], cleanUserId)
+              : []
+          return {
+            activeUserId: cleanUserId,
+            locations: userLocations,
+          }
+        })
+      },
+
+      /**
+       * Adds a new validated delivery spot for the active authenticated user.
        */
       addLocation(data) {
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) {
+          throw new Error('Authentication required to save delivery spots.')
+        }
+
         const validation = validateAddressInput(data)
         if (!validation.isValid) {
           const firstErr = Object.values(validation.errors)[0]
@@ -175,35 +230,47 @@ export const useAddressStore = create(
 
         const now = new Date().toISOString()
         const id = generateLocationId()
-        const existing = get().locations
-        const shouldBeDefault = Boolean(data.isDefault) || existing.length === 0
+        const currentLocations = get().locationsByUser[activeUserId] || []
+        const shouldBeDefault = Boolean(data.isDefault) || currentLocations.length === 0
 
         const newLocation = {
           id,
+          userId: activeUserId,
           ...validation.sanitized,
           isDefault: shouldBeDefault,
           createdAt: now,
           updatedAt: now,
         }
 
-        set((state) => {
-          let updatedList = [...state.locations]
-          if (shouldBeDefault) {
-            updatedList = updatedList.map((loc) => ({ ...loc, isDefault: false }))
-          }
-          return {
-            locations: sanitizeStoredLocations([...updatedList, newLocation]),
-          }
-        })
+        let updatedList = [...currentLocations]
+        if (shouldBeDefault) {
+          updatedList = updatedList.map((loc) => ({ ...loc, isDefault: false }))
+        }
+        const sanitizedList = sanitizeStoredLocations([...updatedList, newLocation], activeUserId)
+
+        set((state) => ({
+          activeUserId,
+          locations: sanitizedList,
+          locationsByUser: {
+            ...state.locationsByUser,
+            [activeUserId]: sanitizedList,
+          },
+        }))
 
         return newLocation
       },
 
       /**
-       * Updates an existing delivery spot by ID with full validation.
+       * Updates an existing delivery spot by ID for the active authenticated user.
        */
       updateLocation(id, updates) {
-        const existing = get().locations.find((l) => l.id === id)
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) {
+          throw new Error('Authentication required to update delivery spots.')
+        }
+
+        const currentLocations = get().locationsByUser[activeUserId] || []
+        const existing = currentLocations.find((l) => l.id === id)
         if (!existing) {
           throw new Error('Delivery spot not found.')
         }
@@ -219,87 +286,187 @@ export const useAddressStore = create(
         const shouldBeDefault =
           updates.isDefault !== undefined ? Boolean(updates.isDefault) : existing.isDefault
 
-        set((state) => {
-          const list = state.locations.map((loc) => {
-            if (loc.id === id) {
-              return {
-                ...loc,
-                ...validation.sanitized,
-                isDefault: shouldBeDefault,
-                updatedAt: now,
-              }
+        const updatedList = currentLocations.map((loc) => {
+          if (loc.id === id) {
+            return {
+              ...loc,
+              userId: activeUserId,
+              ...validation.sanitized,
+              isDefault: shouldBeDefault,
+              updatedAt: now,
             }
-            if (shouldBeDefault) {
-              return { ...loc, isDefault: false }
-            }
-            return loc
-          })
-
-          return { locations: sanitizeStoredLocations(list) }
+          }
+          if (shouldBeDefault) {
+            return { ...loc, isDefault: false }
+          }
+          return loc
         })
+        const sanitizedList = sanitizeStoredLocations(updatedList, activeUserId)
 
-        return get().locations.find((l) => l.id === id)
+        set((state) => ({
+          activeUserId,
+          locations: sanitizedList,
+          locationsByUser: {
+            ...state.locationsByUser,
+            [activeUserId]: sanitizedList,
+          },
+        }))
+
+        return sanitizedList.find((l) => l.id === id)
       },
 
       /**
-       * Removes a delivery spot by ID.
-       * If the deleted spot was default, automatically designates the first remaining spot as default.
-       * If the list becomes empty, default safely resets to null.
+       * Removes a delivery spot by ID for the active authenticated user.
+       * If deleted spot was default, automatically designates the next available spot as default.
        */
       deleteLocation(id) {
-        set((state) => {
-          const remaining = state.locations.filter((l) => l.id !== id)
-          return { locations: sanitizeStoredLocations(remaining) }
-        })
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) {
+          throw new Error('Authentication required to delete delivery spots.')
+        }
+
+        const currentLocations = get().locationsByUser[activeUserId] || []
+        const remaining = currentLocations.filter((l) => l.id !== id)
+        const sanitizedList = sanitizeStoredLocations(remaining, activeUserId)
+
+        set((state) => ({
+          activeUserId,
+          locations: sanitizedList,
+          locationsByUser: {
+            ...state.locationsByUser,
+            [activeUserId]: sanitizedList,
+          },
+        }))
       },
 
       /**
-       * Sets a delivery spot as the default location and unsets all others.
+       * Sets a delivery spot as the default location for the active user.
        */
       setDefaultLocation(id) {
-        set((state) => {
-          const target = state.locations.find((l) => l.id === id)
-          if (!target) return state
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) {
+          throw new Error('Authentication required to set default delivery spot.')
+        }
 
-          const list = state.locations.map((loc) => ({
-            ...loc,
-            isDefault: loc.id === id,
-          }))
-          return { locations: list }
-        })
+        const currentLocations = get().locationsByUser[activeUserId] || []
+        const target = currentLocations.find((l) => l.id === id)
+        if (!target) return
+
+        const updatedList = currentLocations.map((loc) => ({
+          ...loc,
+          isDefault: loc.id === id,
+        }))
+        const sanitizedList = sanitizeStoredLocations(updatedList, activeUserId)
+
+        set((state) => ({
+          activeUserId,
+          locations: sanitizedList,
+          locationsByUser: {
+            ...state.locationsByUser,
+            [activeUserId]: sanitizedList,
+          },
+        }))
       },
 
       /**
-       * Returns the designated default location, or the first location if none marked, or null.
+       * Returns designated default location for active user, or null if unauthenticated.
        */
       getDefaultLocation() {
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) return null
         const locations = get().locations
         return locations.find((l) => l.isDefault) || locations[0] || null
       },
 
       /**
-       * Resets the store to an empty state.
+       * Returns all saved locations for active user, or [] if unauthenticated.
+       */
+      getLocations() {
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) return []
+        return get().locations
+      },
+
+      /**
+       * Resets in-memory locations and saved user records (useful for test isolation).
        */
       reset() {
-        set({ locations: [], isLoading: false })
+        const currentUserId = useAuthStore?.getState?.()?.user?.id || null
+        set({
+          activeUserId: currentUserId,
+          locations: [],
+          locationsByUser: {},
+          isLoading: false,
+        })
       },
 
       /**
        * Raw setter for testing recovery from corrupted or migrated records.
        */
       setLocations(raw) {
-        set({ locations: sanitizeStoredLocations(raw) })
+        const activeUserId = get().resolveActiveUserId()
+        if (!activeUserId) {
+          throw new Error('Authentication required to set delivery spots.')
+        }
+        const sanitized = sanitizeStoredLocations(raw, activeUserId)
+        set((state) => ({
+          activeUserId,
+          locations: sanitized,
+          locationsByUser: {
+            ...state.locationsByUser,
+            [activeUserId]: sanitized,
+          },
+        }))
       },
     }),
     {
       name: ADDRESS_STORAGE_KEY,
+      version: 1,
       storage: createJSONStorage(() => zustandSafeStorage),
-      partialize: (state) => ({ locations: state.locations }),
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          state.locations = sanitizeStoredLocations(state.locations)
+      partialize: (state) => ({
+        locationsByUser: state.locationsByUser,
+      }),
+      migrate(persistedState, version) {
+        // Migration from version 0 (shared un-scoped storage):
+        // Old records have no verified ownership. To prevent cross-account exposure,
+        // do NOT assign legacy records to any user. Discard safely.
+        if (version === 0 || !persistedState?.locationsByUser) {
+          return {
+            locationsByUser: {},
+          }
         }
+        return persistedState
+      },
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        const sanitizedByUser = {}
+        if (state.locationsByUser && typeof state.locationsByUser === 'object') {
+          for (const [uid, list] of Object.entries(state.locationsByUser)) {
+            if (uid && Array.isArray(list)) {
+              sanitizedByUser[uid] = sanitizeStoredLocations(list, uid)
+            }
+          }
+        }
+        state.locationsByUser = sanitizedByUser
+
+        const currentUserId = useAuthStore?.getState?.()?.user?.id || null
+        state.activeUserId = currentUserId
+        state.locations =
+          currentUserId && sanitizedByUser[currentUserId]
+            ? sanitizedByUser[currentUserId]
+            : []
       },
     },
   ),
 )
+
+// Automatically synchronize activeUserId on any authStore state change
+if (typeof useAuthStore !== 'undefined' && typeof useAuthStore.subscribe === 'function') {
+  useAuthStore.subscribe((state, prevState) => {
+    const prevId = prevState?.user?.id || null
+    const currentId = state?.user?.id || null
+    if (prevId !== currentId) {
+      useAddressStore.getState().setActiveUser(currentId)
+    }
+  })
+}

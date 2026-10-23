@@ -580,4 +580,292 @@ describe('Milestone 3: Customer Profile & Saved Delivery Spots', () => {
       expect(html).toContain('Apply as Runner')
     })
   })
+
+  // 14. Account Isolation & Privacy Hardening
+  describe('14. Account Isolation & Privacy Hardening', () => {
+    it('1. User A saves a location; logout occurs; locations are no longer visible in-memory or in UI', async () => {
+      // User A is active
+      const spotA = useAddressStore.getState().addLocation({
+        label: 'Aarav Dorm',
+        campusLocation: 'A Block',
+        wing: 'North Wing',
+        floor: '2nd Floor',
+        roomNumber: '204',
+      })
+
+      expect(useAddressStore.getState().locations.length).toBe(1)
+      expect(useAddressStore.getState().locations[0].label).toBe('Aarav Dorm')
+      expect(useAddressStore.getState().locations[0].userId).toBe('usr_customer_aarav')
+
+      // Verify visible in UI
+      let html = renderToString(
+        <MemoryRouter>
+          <SavedLocationsCard />
+        </MemoryRouter>,
+      )
+      expect(html).toContain('Aarav Dorm')
+
+      // Logout occurs
+      await useAuthStore.getState().logout()
+
+      // User session is cleared
+      expect(useAuthStore.getState().user).toBeNull()
+
+      // Locations are immediately wiped from memory
+      expect(useAddressStore.getState().locations).toEqual([])
+      expect(useAddressStore.getState().getDefaultLocation()).toBeNull()
+      expect(useAddressStore.getState().getLocations()).toEqual([])
+
+      // Verify UI shows empty state and does not leak User A's location
+      html = renderToString(
+        <MemoryRouter>
+          <SavedLocationsCard />
+        </MemoryRouter>,
+      )
+      expect(html).toContain('No saved delivery spots yet')
+      expect(html).not.toContain('Aarav Dorm')
+    })
+
+    it("2. User B logs in; User A's locations remain strictly inaccessible", () => {
+      // User A previously saved a location
+      useAddressStore.getState().addLocation({
+        label: 'Aarav Private Spot',
+        campusLocation: 'A Block',
+        roomNumber: '101',
+      })
+
+      // User B logs in
+      useAuthStore.setState({
+        user: {
+          id: 'usr_customer_bob',
+          name: 'Bob Builder',
+          email: 'bob@campus.edu',
+          phone: '+919876543299',
+          roles: [ROLES.CUSTOMER],
+          runnerStatus: null,
+        },
+        token: 'tok_bob',
+      })
+
+      // User B must have zero locations
+      expect(useAddressStore.getState().locations).toEqual([])
+      expect(useAddressStore.getState().getDefaultLocation()).toBeNull()
+      expect(useAddressStore.getState().getLocations()).toEqual([])
+
+      // UI rendered for User B must not leak User A's spot
+      const html = renderToString(
+        <MemoryRouter>
+          <SavedLocationsCard />
+        </MemoryRouter>,
+      )
+      expect(html).toContain('No saved delivery spots yet')
+      expect(html).not.toContain('Aarav Private Spot')
+    })
+
+    it("3. User B saves a different location; switching back to User A restores only User A's data", () => {
+      // 1. User A saves a spot
+      useAddressStore.getState().addLocation({
+        label: 'Aarav Research Lab',
+        campusLocation: 'A Block',
+        roomNumber: 'A-12',
+      })
+
+      // 2. User B logs in
+      useAuthStore.setState({
+        user: {
+          id: 'usr_customer_bob',
+          name: 'Bob Builder',
+          email: 'bob@campus.edu',
+          roles: [ROLES.CUSTOMER],
+        },
+        token: 'tok_bob',
+      })
+
+      expect(useAddressStore.getState().locations).toEqual([])
+
+      // 3. User B saves their own spot
+      useAddressStore.getState().addLocation({
+        label: 'Bob Workshop',
+        campusLocation: 'Mechanical Department Annex',
+        roomNumber: 'M-04',
+      })
+
+      expect(useAddressStore.getState().locations.length).toBe(1)
+      expect(useAddressStore.getState().locations[0].label).toBe('Bob Workshop')
+      expect(useAddressStore.getState().locations[0].userId).toBe('usr_customer_bob')
+
+      // 4. Switch back to User A
+      useAuthStore.setState({
+        user: {
+          id: 'usr_customer_aarav',
+          name: 'Aarav Patel',
+          email: 'aarav@campus.edu',
+          roles: [ROLES.CUSTOMER],
+        },
+        token: 'tok_aarav',
+      })
+
+      const aaravLocations = useAddressStore.getState().locations
+      expect(aaravLocations.length).toBe(1)
+      expect(aaravLocations[0].label).toBe('Aarav Research Lab')
+      expect(aaravLocations[0].userId).toBe('usr_customer_aarav')
+      expect(aaravLocations.some((loc) => loc.label.includes('Bob'))).toBe(false)
+
+      // 5. Switch back to User B
+      useAuthStore.setState({
+        user: {
+          id: 'usr_customer_bob',
+          name: 'Bob Builder',
+          email: 'bob@campus.edu',
+          roles: [ROLES.CUSTOMER],
+        },
+        token: 'tok_bob',
+      })
+
+      const bobLocations = useAddressStore.getState().locations
+      expect(bobLocations.length).toBe(1)
+      expect(bobLocations[0].label).toBe('Bob Workshop')
+      expect(bobLocations[0].userId).toBe('usr_customer_bob')
+      expect(bobLocations.some((loc) => loc.label.includes('Aarav'))).toBe(false)
+    })
+
+    it('4. An unauthenticated session cannot read or modify authenticated users locations', () => {
+      // User A has saved locations
+      useAddressStore.getState().addLocation({
+        label: 'Aarav Vault Spot',
+        campusLocation: 'A Block',
+      })
+
+      // Session becomes unauthenticated
+      useAuthStore.setState({ user: null, token: null, session: null })
+
+      // Reading produces empty state / null
+      expect(useAddressStore.getState().locations).toEqual([])
+      expect(useAddressStore.getState().getLocations()).toEqual([])
+      expect(useAddressStore.getState().getDefaultLocation()).toBeNull()
+
+      // Modifying throws authentication error
+      expect(() => {
+        useAddressStore.getState().addLocation({
+          label: 'Unauth Intruder',
+          campusLocation: 'A Block',
+        })
+      }).toThrow(/authentication required/i)
+
+      expect(() => {
+        useAddressStore.getState().updateLocation('any_id', { label: 'New Label' })
+      }).toThrow(/authentication required/i)
+
+      expect(() => {
+        useAddressStore.getState().deleteLocation('any_id')
+      }).toThrow(/authentication required/i)
+
+      expect(() => {
+        useAddressStore.getState().setDefaultLocation('any_id')
+      }).toThrow(/authentication required/i)
+
+      expect(() => {
+        useAddressStore.getState().setLocations([
+          { id: 'loc_injected', label: 'Injected', campusLocation: 'A Block' },
+        ])
+      }).toThrow(/authentication required/i)
+    })
+
+    it('5. Existing location CRUD, default-location, and storage-sanitization remain intact under account isolation', () => {
+      // Test multi-location default toggle and deletion recovery under active user
+      const spot1 = useAddressStore.getState().addLocation({
+        label: 'Primary Office',
+        campusLocation: 'A Block',
+      })
+      expect(spot1.isDefault).toBe(true)
+
+      const spot2 = useAddressStore.getState().addLocation({
+        label: 'Evening Library',
+        campusLocation: 'B Block',
+        isDefault: true,
+      })
+      expect(spot2.isDefault).toBe(true)
+      expect(useAddressStore.getState().getDefaultLocation().id).toBe(spot2.id)
+
+      // Updating spot 1 to default resets spot 2
+      useAddressStore.getState().setDefaultLocation(spot1.id)
+      expect(useAddressStore.getState().getDefaultLocation().id).toBe(spot1.id)
+
+      // Deleting default spot 1 promotes spot 2 to default
+      useAddressStore.getState().deleteLocation(spot1.id)
+      const remaining = useAddressStore.getState().locations
+      expect(remaining.length).toBe(1)
+      expect(remaining[0].id).toBe(spot2.id)
+      expect(remaining[0].isDefault).toBe(true)
+    })
+
+    it('6. Auth initialization, logout, and account switching do not briefly expose another users data (zero-latency sync)', () => {
+      useAddressStore.getState().addLocation({
+        label: 'Aarav Private Hub',
+        campusLocation: 'A Block',
+      })
+      expect(useAddressStore.getState().locations.length).toBe(1)
+
+      // Synchronous logout
+      useAuthStore.setState({ user: null })
+      // In the exact same synchronous call frame, locations must be []
+      expect(useAddressStore.getState().locations).toEqual([])
+      expect(useAddressStore.getState().activeUserId).toBeNull()
+
+      // Synchronous login as new user
+      useAuthStore.setState({
+        user: {
+          id: 'usr_new_user_charlie',
+          name: 'Charlie Customer',
+          roles: [ROLES.CUSTOMER],
+        },
+      })
+      // In the exact same synchronous call frame, locations must be [] for Charlie
+      expect(useAddressStore.getState().locations).toEqual([])
+      expect(useAddressStore.getState().activeUserId).toBe('usr_new_user_charlie')
+    })
+
+    it('7. Migration from legacy un-scoped storage key safely discards unowned records without cross-account exposure', () => {
+      const { migrate } = useAddressStore.persist.getOptions()
+      const legacyState = {
+        locations: [
+          { id: 'legacy_1', label: 'Legacy Shared Spot', campusLocation: 'A Block' },
+        ],
+      }
+
+      // Legacy v0 data has no verified userId ownership
+      const migrated = migrate(legacyState, 0)
+      expect(migrated.locationsByUser).toEqual({})
+      expect(migrated.locations).toBeUndefined()
+
+      // Sanitization with expectedUserId drops any mismatched foreign userId
+      const mixedData = [
+        { id: 'foreign_1', userId: 'usr_malicious', label: 'Injected Spot', campusLocation: 'A Block' },
+        { id: 'valid_1', userId: 'usr_customer_aarav', label: 'Authentic Spot', campusLocation: 'A Block' },
+      ]
+      const sanitized = sanitizeStoredLocations(mixedData, 'usr_customer_aarav')
+      expect(sanitized.length).toBe(1)
+      expect(sanitized[0].id).toBe('valid_1')
+      expect(sanitized[0].userId).toBe('usr_customer_aarav')
+    })
+
+    it('8. onRehydrateStorage hydrates active user locations and ignores foreign records', () => {
+      const { onRehydrateStorage } = useAddressStore.persist.getOptions()
+      const postHydrate = onRehydrateStorage()
+      const mockPersistedState = {
+        locationsByUser: {
+          usr_customer_aarav: [
+            { id: 'loc_a1', userId: 'usr_customer_aarav', label: 'Aarav Spot', campusLocation: 'A Block' },
+          ],
+          usr_customer_bob: [
+            { id: 'loc_b1', userId: 'usr_customer_bob', label: 'Bob Spot', campusLocation: 'B Block' },
+          ],
+        },
+      }
+      postHydrate(mockPersistedState)
+      expect(mockPersistedState.activeUserId).toBe('usr_customer_aarav')
+      expect(mockPersistedState.locations.length).toBe(1)
+      expect(mockPersistedState.locations[0].id).toBe('loc_a1')
+    })
+  })
 })

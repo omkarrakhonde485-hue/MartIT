@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dialog, DialogContent } from '@/components/ui/Dialog'
 import { toast } from '@/components/ui/Toaster'
+import { useAuthStore } from '@/stores/authStore'
 import {
   useAddressStore,
   formatSavedLocation,
@@ -43,6 +44,11 @@ export function SavedLocationsCard() {
   const [deletingSpot, setDeletingSpot] = useState(null)
 
   const handleOpenAdd = () => {
+    const user = useAuthStore.getState().user
+    if (!user) {
+      toast.error('Please log in to save delivery spots.')
+      return
+    }
     setEditingSpot(null)
     setIsModalOpen(true)
   }
@@ -53,26 +59,38 @@ export function SavedLocationsCard() {
   }
 
   const handleSaveSpot = (data) => {
-    if (editingSpot?.id) {
-      updateLocation(editingSpot.id, data)
-      toast.success(`"${data.label}" updated successfully.`)
-    } else {
-      addLocation(data)
-      toast.success(`"${data.label}" saved to your delivery spots.`)
+    try {
+      if (editingSpot?.id) {
+        updateLocation(editingSpot.id, data)
+        toast.success(`"${data.label}" updated successfully.`)
+      } else {
+        addLocation(data)
+        toast.success(`"${data.label}" saved to your delivery spots.`)
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to save delivery spot.')
     }
   }
 
   const handleConfirmDelete = () => {
     if (!deletingSpot) return
-    const label = deletingSpot.label
-    deleteLocation(deletingSpot.id)
-    toast.success(`"${label}" removed from saved delivery spots.`)
-    setDeletingSpot(null)
+    try {
+      const label = deletingSpot.label
+      deleteLocation(deletingSpot.id)
+      toast.success(`"${label}" removed from saved delivery spots.`)
+      setDeletingSpot(null)
+    } catch (err) {
+      toast.error(err.message || 'Failed to remove delivery spot.')
+    }
   }
 
   const handleSetDefault = (spot) => {
-    setDefaultLocation(spot.id)
-    toast.success(`"${spot.label}" set as your default delivery spot.`)
+    try {
+      setDefaultLocation(spot.id)
+      toast.success(`"${spot.label}" set as your default delivery spot.`)
+    } catch (err) {
+      toast.error(err.message || 'Failed to set default delivery spot.')
+    }
   }
 
   return (
