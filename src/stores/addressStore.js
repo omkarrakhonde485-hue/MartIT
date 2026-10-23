@@ -106,6 +106,32 @@ export function formatSavedLocation(spot) {
 }
 
 /**
+ * Formats detailed room, wing, floor, landmark, and delivery instructions
+ * from a saved spot into a single compatible instructions string for checkout forms.
+ */
+export function formatSpotDeliveryDetails(spot) {
+  if (!spot) return ''
+  const parts = []
+  if (spot.roomNumber) parts.push(`Room ${spot.roomNumber}`)
+  if (spot.floor) {
+    const fl = spot.floor.trim()
+    parts.push(fl.toLowerCase().includes('floor') ? fl : `${fl} Floor`)
+  }
+  if (spot.wing) {
+    const w = spot.wing.trim()
+    parts.push(w.toLowerCase().includes('wing') ? w : `${w} Wing`)
+  }
+  if (spot.landmark) {
+    const lm = spot.landmark.trim()
+    parts.push(lm.toLowerCase().startsWith('near') ? lm : `Near ${lm.replace(/^near\s+/i, '')}`)
+  }
+  if (spot.deliveryInstructions) {
+    parts.push(spot.deliveryInstructions.trim())
+  }
+  return parts.join(', ')
+}
+
+/**
  * Recovers, sanitizes, and normalizes persisted location records from client storage.
  * Enforces user ownership when expectedUserId is provided.
  * Gracefully handles non-arrays, missing IDs/labels, corrupted items, and conflicting defaults.

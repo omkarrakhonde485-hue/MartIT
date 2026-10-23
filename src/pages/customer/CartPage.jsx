@@ -14,6 +14,10 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useCartStore, selectCartStoreId, selectCartCount } from '@/stores/cartStore'
+import {
+  useAddressStore,
+  formatSpotDeliveryDetails,
+} from '@/stores/addressStore'
 import { useStores, useProducts } from '@/hooks/useCatalogue'
 import { useLocations } from '@/hooks/useLocations'
 import { useDeliveryQuote } from '@/hooks/useDeliveryQuote'
@@ -79,6 +83,51 @@ export default function CartPage() {
       setCheckoutDetails(updates)
     }
   }, [user, checkoutDetails?.fullName, checkoutDetails?.mobileNumber, setCheckoutDetails])
+
+  // Saved delivery spots from address store
+  const savedLocations = useAddressStore((s) => s.locations) || []
+  const defaultSavedSpot = useAddressStore((s) => s.getDefaultLocation())
+
+  // Preselect default saved spot only when appropriate (not overwriting deliberate user input)
+  useEffect(() => {
+    if (!user || !defaultSavedSpot) return
+
+    // If user already deliberately chose manual or a specific spot, don't overwrite
+    if (checkoutDetails?.selectedSpotId) return
+
+    // If user already typed custom location or delivery instructions, don't overwrite
+    if (checkoutDetails?.customLocation?.trim() || checkoutDetails?.deliveryInstructions?.trim()) {
+      return
+    }
+
+    const isOther =
+      defaultSavedSpot.campusLocation === 'other' ||
+      !PRESET_CAMPUS_LOCATIONS.includes(defaultSavedSpot.campusLocation)
+
+    const presetLocation = isOther ? OTHER_LOCATION_VALUE : defaultSavedSpot.campusLocation
+    const customLocation = isOther ? (defaultSavedSpot.customBuilding || defaultSavedSpot.campusLocation || '') : ''
+    const deliveryInstructions = formatSpotDeliveryDetails(defaultSavedSpot)
+
+    setCheckoutDetails({
+      selectedSpotId: defaultSavedSpot.id,
+      selectedSpotLabel: defaultSavedSpot.label,
+      presetLocation,
+      customLocation,
+      deliveryInstructions,
+    })
+  }, [user, defaultSavedSpot, checkoutDetails?.selectedSpotId, checkoutDetails?.customLocation, checkoutDetails?.deliveryInstructions, setCheckoutDetails])
+
+  // Reset selected saved spot if user logs out
+  useEffect(() => {
+    if (!user && checkoutDetails?.selectedSpotId) {
+      setCheckoutDetails({
+        selectedSpotId: null,
+        selectedSpotLabel: null,
+        saveNewSpot: false,
+        newSpotLabel: '',
+      })
+    }
+  }, [user, checkoutDetails?.selectedSpotId, setCheckoutDetails])
 
   // Map selected campus preset / other to authoritative registered delivery destination ID
   const selectedLocationId = useMemo(() => {
@@ -176,6 +225,16 @@ export default function CartPage() {
   }
 
   const formattedAddressPreview = useMemo(() => {
+    if (checkoutDetails?.selectedSpotLabel) {
+      const isOther =
+        checkoutDetails?.presetLocation === OTHER_LOCATION_VALUE ||
+        checkoutDetails?.presetLocation === 'other'
+      const baseLoc = isOther
+        ? (checkoutDetails?.customLocation?.trim() || 'Custom Location')
+        : (checkoutDetails?.presetLocation || 'A Block')
+      const instructions = checkoutDetails?.deliveryInstructions?.trim()
+      return `${checkoutDetails.selectedSpotLabel} (${baseLoc}${instructions ? ` • ${instructions}` : ''})`
+    }
     const isOther =
       checkoutDetails?.presetLocation === OTHER_LOCATION_VALUE ||
       checkoutDetails?.presetLocation === 'other'
@@ -191,6 +250,7 @@ export default function CartPage() {
       ? `${preset}, ${checkoutDetails.deliveryInstructions.trim()}`
       : preset
   }, [
+    checkoutDetails?.selectedSpotLabel,
     checkoutDetails?.presetLocation,
     checkoutDetails?.customLocation,
     checkoutDetails?.deliveryInstructions,
@@ -199,6 +259,9 @@ export default function CartPage() {
   // Handle Order Placement
   const handlePlaceOrder = async () => {
     if (!canSubmitOrder) return
+
+    const isSavedSpotSelected =
+      checkoutDetails?.selectedSpotId && checkoutDetails.selectedSpotId !== 'manual'
 
     // 1. Authoritative validation of customer delivery details
     const validation = validateCheckoutDetails({
@@ -209,6 +272,10 @@ export default function CartPage() {
       deliveryInstructions: checkoutDetails?.deliveryInstructions,
       availableLocations: locations,
       fallbackLocationId: user?.defaultLocationId || 'loc_hostel_b',
+      savedSpotId: isSavedSpotSelected ? checkoutDetails.selectedSpotId : null,
+      savedSpotLabel: isSavedSpotSelected ? (checkoutDetails.selectedSpotLabel || null) : null,
+      saveNewSpot: Boolean(user && checkoutDetails?.saveNewSpot && !isSavedSpotSelected),
+      newSpotLabel: checkoutDetails?.newSpotLabel,
     })
 
     if (!validation.isValid) {
@@ -245,6 +312,40 @@ export default function CartPage() {
         Math.abs(newOrder.pricing.total - (newOrder.pricing.baseAmount + newOrder.pricing.platformFee)) > 0.001
       ) {
         throw new Error('Order was created with an invalid pricing snapshot. Please contact support.')
+      }
+
+      // If customer opted in to save this new delivery location, save it to their profile
+      if (user && checkoutDetails?.saveNewSpot && !isSavedSpotSelected) {
+        try {
+          const isOther = checkoutDetails.presetLocation === OTHER_LOCATION_VALUE
+          const spotLabel =
+            (checkoutDetails.newSpotLabel || '').trim() ||
+            `${checkoutDetails.presetLocation || 'Campus'} Spot`
+          const campusLocation = isOther ? 'other' : checkoutDetails.presetLocation
+          const customBuilding = isOther ? (checkoutDetails.customLocation || '').trim() : ''
+          const deliveryInstructions = (checkoutDetails.deliveryInstructions || '').trim()
+
+          const existingSpots = useAddressStore.getState().locations
+          const alreadyExists = existingSpots.some(
+            (s) =>
+              s.label.toLowerCase() === spotLabel.toLowerCase() ||
+              (s.campusLocation === campusLocation &&
+               (s.customBuilding || '') === customBuilding &&
+               (s.deliveryInstructions || '') === deliveryInstructions),
+          )
+
+          if (!alreadyExists) {
+            useAddressStore.getState().addLocation({
+              label: spotLabel,
+              campusLocation,
+              customBuilding,
+              deliveryInstructions,
+              isDefault: Boolean(checkoutDetails.setAsDefaultSpot),
+            })
+          }
+        } catch (saveErr) {
+          console.warn('Failed to save checkout address to address store:', saveErr)
+        }
       }
 
       // Clear cart only after successful response
@@ -408,7 +509,11 @@ export default function CartPage() {
                   <span>Delivery Destination</span>
                 </span>
                 <span className="text-[11px] font-semibold text-brand">
-                  {checkoutDetails?.presetLocation === OTHER_LOCATION_VALUE ? 'Custom' : 'Preset'}
+                  {checkoutDetails?.selectedSpotLabel
+                    ? 'Saved Spot'
+                    : checkoutDetails?.presetLocation === OTHER_LOCATION_VALUE
+                    ? 'Custom'
+                    : 'Preset'}
                 </span>
               </div>
               <p className="font-semibold text-ink truncate">

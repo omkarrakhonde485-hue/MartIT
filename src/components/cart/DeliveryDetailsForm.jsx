@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { Link } from 'react-router'
 import {
   User,
   Phone,
@@ -8,9 +9,16 @@ import {
   Check,
   ChevronDown,
   Navigation,
+  Bookmark,
 } from 'lucide-react'
 import { Field } from '@/components/ui/Field'
 import { Input } from '@/components/ui/Input'
+import { useAuthStore } from '@/stores/authStore'
+import {
+  useAddressStore,
+  formatSavedLocation,
+  formatSpotDeliveryDetails,
+} from '@/stores/addressStore'
 import {
   PRESET_CAMPUS_LOCATIONS,
   OTHER_LOCATION_VALUE,
@@ -27,9 +35,11 @@ import { cn } from '@/utils/cn'
  *    - Full Name (Required, trimmed non-empty, prefillable)
  *    - Phone Number (Required, Indian mobile format, inline validation)
  * 2. Delivery Destination:
+ *    - Saved Delivery Spots (when authenticated user has saved locations)
  *    - Campus Destination (Searchable combobox & dropdown with exact 8 presets + Other / Enter address)
  *    - Destination Address (Revealed when Other / Enter address is selected, required free-text)
  *    - Detailed address / landmark (Optional text input for extra directions: hostel name, floor, room, landmark)
+ *    - Optional opt-in to save entered address for future orders
  */
 export function DeliveryDetailsForm({
   details,
@@ -38,7 +48,18 @@ export function DeliveryDetailsForm({
   disabled = false,
   className,
   initialDropdownOpen = false,
+  savedLocations: customSavedLocations,
 }) {
+  const userFromHook = useAuthStore((s) => s.user)
+  const user = userFromHook ?? useAuthStore.getState().user
+  const storeSavedLocations = useAddressStore((s) => s.locations)
+  const fallbackLocations = useAddressStore.getState().locations || []
+  const savedLocations =
+    customSavedLocations ??
+    (storeSavedLocations && storeSavedLocations.length > 0
+      ? storeSavedLocations
+      : fallbackLocations)
+
   const [isDropdownOpen, setIsDropdownOpen] = useState(initialDropdownOpen)
   const dropdownRef = useRef(null)
   const listboxRef = useRef(null)
@@ -48,6 +69,28 @@ export function DeliveryDetailsForm({
     details.presetLocation === OTHER_LOCATION_LABEL ||
     details.presetLocation === LEGACY_OTHER_LABEL ||
     details.presetLocation === 'Other / Enter address'
+
+  const handleSelectSavedSpot = (spot) => {
+    const isOther =
+      spot.campusLocation === 'other' ||
+      !PRESET_CAMPUS_LOCATIONS.includes(spot.campusLocation)
+
+    const preset = isOther ? OTHER_LOCATION_VALUE : spot.campusLocation
+    const custom = isOther ? (spot.customBuilding || spot.campusLocation || '') : ''
+    const instructions = formatSpotDeliveryDetails(spot)
+
+    onChange('selectedSpotId', spot.id)
+    onChange('selectedSpotLabel', spot.label)
+    onChange('presetLocation', preset)
+    onChange('customLocation', custom)
+    onChange('deliveryInstructions', instructions)
+    onChange('saveNewSpot', false)
+  }
+
+  const handleSelectManual = () => {
+    onChange('selectedSpotId', 'manual')
+    onChange('selectedSpotLabel', null)
+  }
 
   // Close dropdown on outside click or Escape key
   useEffect(() => {
@@ -92,6 +135,8 @@ export function DeliveryDetailsForm({
   }, [isDropdownOpen])
 
   const handleSelectLocation = (locationValue) => {
+    onChange('selectedSpotId', 'manual')
+    onChange('selectedSpotLabel', null)
     onChange('presetLocation', locationValue)
     setIsDropdownOpen(false)
   }
@@ -180,10 +225,130 @@ export function DeliveryDetailsForm({
           <div>
             <h2 className="text-base font-bold text-ink leading-tight">Delivery Destination</h2>
             <p className="text-xs text-ink-subtle">
-              Select your campus block or enter an address for our runner.
+              Select a saved delivery spot or enter an address for our runner.
             </p>
           </div>
         </div>
+
+        {/* 2a. Saved Locations Section (for authenticated users) */}
+        {user && savedLocations.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold uppercase tracking-wider text-ink-subtle">
+                Your Saved Delivery Spots
+              </label>
+              <Link
+                to="/app/profile"
+                className="text-xs font-medium text-brand hover:underline inline-flex items-center gap-1"
+                data-testid="manage-spots-link"
+              >
+                Manage Spots
+              </Link>
+            </div>
+
+            <div
+              className="grid grid-cols-1 sm:grid-cols-2 gap-2.5"
+              data-testid="checkout-saved-spots-list"
+            >
+              {savedLocations.map((spot) => {
+                const isSelected = details.selectedSpotId === spot.id
+                const summary = formatSavedLocation(spot)
+                return (
+                  <button
+                    key={spot.id}
+                    type="button"
+                    data-testid={`saved-spot-card-${spot.id}`}
+                    onClick={() => handleSelectSavedSpot(spot)}
+                    disabled={disabled}
+                    className={cn(
+                      'flex flex-col items-start gap-1 rounded-card border p-3 text-left transition-all',
+                      isSelected
+                        ? 'border-brand bg-brand-soft/20 shadow-1 ring-1 ring-brand'
+                        : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2/40',
+                      disabled && 'opacity-60 cursor-not-allowed',
+                    )}
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className="font-semibold text-sm text-ink truncate">
+                        {spot.label}
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {spot.isDefault && (
+                          <span
+                            className="rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-bold text-fresh-ink"
+                            data-testid={`saved-spot-default-badge-${spot.id}`}
+                          >
+                            Default
+                          </span>
+                        )}
+                        {isSelected && (
+                          <span
+                            className="grid size-4 place-items-center rounded-full bg-brand text-brand-ink"
+                            data-testid={`saved-spot-selected-check-${spot.id}`}
+                          >
+                            <Check className="size-2.5 stroke-[3]" aria-hidden="true" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-ink-muted line-clamp-1">
+                      {summary}
+                    </p>
+                  </button>
+                )
+              })}
+
+              {/* Enter another address card */}
+              <button
+                type="button"
+                data-testid="manual-location-card"
+                onClick={handleSelectManual}
+                disabled={disabled}
+                className={cn(
+                  'flex flex-col items-start justify-center gap-1 rounded-card border p-3 text-left transition-all',
+                  details.selectedSpotId === 'manual' || !details.selectedSpotId
+                    ? 'border-brand bg-brand-soft/20 shadow-1 ring-1 ring-brand'
+                    : 'border-line border-dashed bg-surface hover:border-line-strong hover:bg-surface-2/40',
+                  disabled && 'opacity-60 cursor-not-allowed',
+                )}
+              >
+                <div className="flex w-full items-center justify-between gap-2">
+                  <span className="font-semibold text-sm text-ink">
+                    + Enter another address
+                  </span>
+                  {(details.selectedSpotId === 'manual' || !details.selectedSpotId) && (
+                    <span
+                      className="grid size-4 place-items-center rounded-full bg-brand text-brand-ink"
+                      data-testid="manual-location-selected-check"
+                    >
+                      <Check className="size-2.5 stroke-[3]" aria-hidden="true" />
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-ink-muted">
+                  Type in another building or drop-off spot
+                </p>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 2b. Notice when authenticated but 0 spots saved */}
+        {user && savedLocations.length === 0 && (
+          <div
+            className="flex items-center justify-between rounded-tile border border-dashed border-line bg-surface-2/40 px-3.5 py-2.5 text-xs text-ink-muted"
+            data-testid="no-saved-spots-notice"
+          >
+            <span>No saved delivery spots yet.</span>
+            <Link
+              to="/app/profile"
+              className="font-medium text-brand hover:underline inline-flex items-center gap-1"
+              data-testid="manage-spots-link"
+            >
+              Add spots in Profile →
+            </Link>
+          </div>
+        )}
 
         {/* Campus Destination Selector */}
         <div className="space-y-1.5">
@@ -378,6 +543,68 @@ export function DeliveryDetailsForm({
             disabled={disabled}
           />
         </Field>
+
+        {/* 2c. Opt-in to save this address for future orders (when entering manually) */}
+        {user && (details.selectedSpotId === 'manual' || !details.selectedSpotId) && (
+          <div className="rounded-card border border-line bg-surface-2/30 p-3.5 space-y-3" data-testid="save-spot-opt-in-card">
+            <label
+              htmlFor="save-address-opt-in"
+              className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-ink select-none"
+            >
+              <input
+                type="checkbox"
+                id="save-address-opt-in"
+                data-testid="save-address-opt-in"
+                checked={Boolean(details.saveNewSpot)}
+                onChange={(e) => onChange('saveNewSpot', e.target.checked)}
+                disabled={disabled}
+                className="size-4 rounded border-line-strong text-brand focus:ring-brand accent-brand cursor-pointer"
+              />
+              <span className="inline-flex items-center gap-1.5">
+                <Bookmark className="size-3.5 text-brand" aria-hidden="true" />
+                <span>Save this delivery spot for future orders</span>
+              </span>
+            </label>
+
+            {details.saveNewSpot && (
+              <div className="space-y-3 pt-1 animate-fade-in" data-testid="new-spot-fields">
+                <Field
+                  label="Spot Label"
+                  hint="Give this spot a name (e.g. My Hostel Room, Science Lab, Central Library)"
+                  error={errors.newSpotLabel}
+                >
+                  <Input
+                    id="checkout-new-spot-label"
+                    data-testid="checkout-new-spot-label"
+                    name="newSpotLabel"
+                    type="text"
+                    placeholder="e.g. My Hostel Room"
+                    value={details.newSpotLabel || ''}
+                    onChange={(e) => onChange('newSpotLabel', e.target.value)}
+                    disabled={disabled}
+                    aria-required="true"
+                  />
+                </Field>
+
+                <label
+                  htmlFor="set-default-opt-in"
+                  className="flex items-center gap-2 cursor-pointer text-xs text-ink-muted select-none"
+                >
+                  <input
+                    type="checkbox"
+                    id="set-default-opt-in"
+                    data-testid="set-default-opt-in"
+                    checked={Boolean(details.setAsDefaultSpot)}
+                    onChange={(e) => onChange('setAsDefaultSpot', e.target.checked)}
+                    disabled={disabled}
+                    className="size-3.5 rounded border-line-strong text-brand focus:ring-brand accent-brand cursor-pointer"
+                  />
+                  <span>Set as my default delivery spot</span>
+                </label>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   )

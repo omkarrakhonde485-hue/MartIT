@@ -317,6 +317,10 @@ export function validateCheckoutDetails({
   deliveryInstructions,
   availableLocations = [],
   fallbackLocationId = 'loc_hostel_b',
+  savedSpotId = null,
+  savedSpotLabel = null,
+  saveNewSpot = false,
+  newSpotLabel = '',
 }) {
   const nameResult = validateFullName(fullName)
   const mobileInput = phoneNumber || mobileNumber
@@ -333,6 +337,17 @@ export function validateCheckoutDetails({
   if (!locationResult.isValid) {
     if (locationResult.error) errors.location = locationResult.error
     if (locationResult.customError) errors.customLocation = locationResult.customError
+  }
+
+  if (saveNewSpot) {
+    const cleanLabel = (newSpotLabel || '').trim()
+    if (!cleanLabel) {
+      errors.newSpotLabel = 'Please enter a label for this spot (e.g. My Hostel Room).'
+    } else if (cleanLabel.length < 2) {
+      errors.newSpotLabel = 'Spot label must be at least 2 characters.'
+    } else if (cleanLabel.length > 50) {
+      errors.newSpotLabel = 'Spot label cannot exceed 50 characters.'
+    }
   }
 
   const destinationLocationId = mapCampusLocationToDestinationId(
@@ -359,7 +374,11 @@ export function validateCheckoutDetails({
           destinationLocationId,
           selectedDestination: locationResult.data.selectedDestination,
           detailedAddress: locationResult.data.detailedAddress,
-          deliveryLocation: locationResult.data,
+          deliveryLocation: {
+            ...locationResult.data,
+            ...(savedSpotId ? { savedSpotId, savedSpotLabel: savedSpotLabel || null } : {}),
+          },
+          ...(savedSpotId ? { savedSpotId, savedSpotLabel: savedSpotLabel || null } : {}),
         }
       : null,
   }
