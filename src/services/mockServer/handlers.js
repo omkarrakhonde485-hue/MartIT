@@ -231,9 +231,69 @@ export function createMockServer({ routingProvider = null } = {}) {
       return publicUser(target)
     },
 
+    /**
+     * Lists all orders across the campus platform for administrators.
+     * Enforces ORDERS_READ_ALL permission.
+     */
+    'admin.orders.list': ({ status, paymentStatus, storeId, runnerId, search } = {}, { token }) => {
+      requirePermission(token, PERMISSIONS.ORDERS_READ_ALL)
+
+      for (const sample of SAMPLE_ORDERS) {
+        if (!db.orders.some((o) => o.id === sample.id)) {
+          db.orders.push(structuredClone(sample))
+        }
+      }
+
+      let orders = db.orders.map((o) => {
+        const sanitized = structuredClone(o)
+        delete sanitized.handoverOtpHash
+        delete sanitized._mockOtp
+        return sanitized
+      })
+
+      if (status) {
+        orders = orders.filter((o) => o.status === status)
+      }
+      if (paymentStatus) {
+        orders = orders.filter((o) => (o.paymentStatus || o.payment?.status) === paymentStatus)
+      }
+      if (storeId) {
+        orders = orders.filter((o) => o.storeId === storeId)
+      }
+      if (runnerId) {
+        orders = orders.filter((o) => o.runnerId === runnerId)
+      }
+      if (search && typeof search === 'string') {
+        const q = search.trim().toLowerCase()
+        orders = orders.filter((o) => {
+          const idMatch = o.id?.toLowerCase().includes(q)
+          const nameMatch = o.customerDetails?.fullName?.toLowerCase().includes(q)
+          const phoneMatch = o.customerDetails?.phoneNumber?.includes(q)
+          const customerIdMatch = o.customerId?.toLowerCase().includes(q)
+          return idMatch || nameMatch || phoneMatch || customerIdMatch
+        })
+      }
+
+      orders.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      return orders
+    },
+
     // ---- locations & stores ------------------------------------------------
     'locations.list': () => db.locations.map(({ id, name, group }) => ({ id, name, group })),
     'stores.list': () => db.stores.map(({ id, name, isOpen }) => ({ id, name, isOpen })),
+    'stores.update': ({ storeId, isOpen, description }, { token }) => {
+      const user = requireUser(token)
+      const hasStaffAccess =
+        user.roles.includes(ROLES.ADMIN) || user.roles.includes(ROLES.SUPER_ADMIN)
+      const store = db.stores.find((s) => s.id === storeId)
+      if (!store) throw new ApiError('STORE_NOT_FOUND', 'Store not found.', 404)
+      if (!hasStaffAccess && store.ownerId !== user.id) {
+        throw new ApiError('FORBIDDEN', "You don't have permission to update this store.", 403)
+      }
+      if (typeof isOpen === 'boolean') store.isOpen = isOpen
+      if (typeof description === 'string') store.description = description
+      return store
+    },
 
     // ---- catalogue ----------------------------------------------------------
     'catalogue.products': ({ storeId } = {}) => {

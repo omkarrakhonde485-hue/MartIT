@@ -139,4 +139,43 @@ describe('admin endpoints', () => {
     const me = await server.handle('auth.me', {}, { token: signupRes.token })
     expect(me.roles).toContain('customer')
   })
+
+  it('admin can list all orders across the campus platform, while non-admins are blocked', async () => {
+    const custToken = await login('customer')
+    await expect(
+      server.handle('admin.orders.list', {}, { token: custToken })
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 })
+
+    const adminToken = await login('super_admin')
+    const allOrders = await server.handle('admin.orders.list', {}, { token: adminToken })
+    expect(Array.isArray(allOrders)).toBe(true)
+    expect(allOrders.length).toBeGreaterThan(0)
+
+    // Supports status filtering
+    const delivered = await server.handle(
+      'admin.orders.list',
+      { status: 'DELIVERED' },
+      { token: adminToken }
+    )
+    expect(Array.isArray(delivered)).toBe(true)
+    for (const o of delivered) {
+      expect(o.status).toBe('DELIVERED')
+    }
+  })
+
+  it('admin can update store operational status and description', async () => {
+    const custToken = await login('customer')
+    await expect(
+      server.handle('stores.update', { storeId: 'store_campus_mart', isOpen: false }, { token: custToken })
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 })
+
+    const adminToken = await login('super_admin')
+    const updated = await server.handle(
+      'stores.update',
+      { storeId: 'store_campus_mart', isOpen: false, description: 'Temporarily closed for inventory' },
+      { token: adminToken }
+    )
+    expect(updated.isOpen).toBe(false)
+    expect(updated.description).toBe('Temporarily closed for inventory')
+  })
 })

@@ -1,0 +1,181 @@
+# MartIT — Feature Roadmap & Implementation Guide
+
+**Purpose:** This is the authoritative feature backlog for MartIT. Use it to assess what exists, finish incomplete high-priority functionality, and implement genuinely missing features in priority order. The goal is a reliable campus grocery delivery product for customers, stores, runners, and admins.
+
+**Status:** ACTIVE IMPLEMENTATION & VERIFICATION LEDGER
+
+## Guide for the coding agent
+
+1. Read `docs/FINAL_PRODUCT_PLAN.md` first, then this file and the relevant implementation/docs.
+2. Inspect the repository, current branch, working tree, architecture, scripts, and tests. Preserve unrelated user changes.
+3. Classify each feature as `VERIFIED`, `IMPLEMENTED — NEEDS VERIFICATION`, `MISSING`, `NOT NOW`, or `BLOCKED — USER ACTION REQUIRED`.
+4. Do not stop after an audit. After a short baseline check, start implementing the highest-priority actionable gaps.
+5. Work in dependency order. Make small changes, test each change, fix regressions, and commit each completed milestone automatically.
+6. Update this file's status and progress log with concise evidence, test results, and commit SHA after each milestone.
+7. Continue autonomously through independent tasks. Ask only when genuinely blocked by access or approval the user alone can provide.
+8. Do not create duplicate planning documents, repeat completed audits, or rebuild working functionality without a demonstrated defect.
+9. If code might be used dynamically or externally, preserve it until safe removal or replacement is proven.
+10. At completion, summarize implementation, verification, tests/build, commits, and exact user actions remaining.
+
+## Strict safety and architecture rules
+
+- Preserve the agreed **Make.com + Gmail notification-source payment verification workflow**. Do not add Paytm gateway/API integration or SMS OTP.
+- Opening a UPI app or returning from it is never proof of payment. Never mark orders paid without the existing trusted server-side verification flow.
+- HTTP 200 alone never means payment success. Preserve safe handling of positive, negative, malformed, unknown, timeout, network-error, and unconfigured webhook outcomes.
+- Preserve current pricing, whole-rupee base calculation, dynamic platform-fee suffix range/allocation/release timing, distance-based delivery fee, night surcharge, and checkout totals.
+- Preserve the existing four-role design, permissions, order lifecycle, inventory reservation/release/expiry, atomic runner acceptance, store pickup ownership checks, in-app delivery OTP protections, and exactly-once delivery completion.
+- Do not change schema, apply migrations, alter live data, create real accounts, grant roles, change production settings, make real payments, push, merge, or deploy without explicit authorization.
+- Never expose or commit secrets, tokens, passwords, private keys, `.env` files, or secret-bearing webhook URLs.
+- Prefer targeted changes. No broad refactors, framework migrations, dependency upgrades, or unrelated redesigns.
+- Do not mark features complete based only on mocks or placeholder screens if live integration remains unverified. Clearly distinguish automated evidence from hosted end-to-end evidence.
+
+## Priority definitions
+
+- **P0 — Launch reliability:** essential for trustworthy ordering, payment, fulfillment, and safe role operations.
+- **P1 — Daily usability:** removes recurring friction for customers and operators.
+- **P2 — Growth/optimization:** only after P0 is reliable and P1 is substantially complete.
+
+## Customer features
+
+### P0
+- [x] Accurate catalogue, prices, availability, cart totals, and checkout validation.
+- [x] Transparent item subtotal, distance-based delivery fee, applicable night surcharge, and platform fee.
+- [x] Mobile-friendly **Pay with UPI** button opening the exact same UPI URI embedded in the QR; retain QR fallback.
+- [x] Truthful payment states: awaiting confirmation, verifying, confirmed, unsuccessful, needs assistance.
+- [x] Clear order status through delivery.
+- [x] Order history and accurate itemized receipt.
+- [x] Support path for debited-but-unconfirmed payments, missing items, and delays.
+- [x] Safe handling of unavailable items before checkout; never silently substitute products.
+- [x] Delivery OTP access/recovery consistent with ownership and order lifecycle.
+
+### P1
+- [x] Reorder previous purchases.
+- [ ] Product search, category filters, and sorting.
+- [ ] Saved campus locations, delivery instructions, and landmarks.
+- [x] Cancellation eligibility and clear payment implications.
+- [ ] Notifications for confirmation, preparation, pickup, delays, and delivery.
+- [ ] Favorites and shopping lists.
+- [x] Clear loading, empty, retry, offline, and error states.
+
+### P2
+- [ ] Scheduled delivery windows if campus operations support them.
+- [ ] Repeat-purchase reminders and useful recommendations.
+- [ ] Promotions/loyalty with transparent eligibility and pricing.
+
+## Store / merchant features
+
+### P0
+- [x] Incoming-order queue with clear statuses and timestamps. (Admin / Operations console)
+- [x] Accept/prepare/ready-for-pickup actions with valid state transitions. (Multi-store runner pickup & admin queue)
+- [x] Product stock and availability controls. (Catalogue availability guards)
+- [x] Mark products unavailable and temporarily pause/close the store. (Admin Store Operations & API)
+- [x] Exact order item/quantity checklist and reliable pickup handoff.
+- [x] Prevent duplicate processing and conflicting status updates.
+
+### P1
+- [ ] Daily order/sales summary with clearly defined metrics.
+- [ ] Low-stock alerts and frequently ordered product view.
+- [ ] Opening hours and preparation-time estimates.
+- [ ] Cancellation and stock-adjustment history.
+- [x] Store-specific pickup and outstanding-order view.
+
+### P2
+- [ ] Demand and stock recommendations once trustworthy data exists.
+
+## Runner features
+
+### P0
+- [x] Online/offline availability control.
+- [x] Eligible delivery offers with clear pickup, destination, order details, and payout information.
+- [x] Atomic order acceptance: only one runner can accept an order.
+- [x] Correct store/fulfillment-group pickup checklist.
+- [x] Clear preparing, ready, picked-up, in-transit, and delivered states.
+- [x] In-app delivery OTP with assignment checks, expiry, attempt limits, replay protection, and exactly-once completion.
+- [x] Completed/cancelled delivery history.
+- [x] Correct persisted item counts, order totals, and delivery-fee display.
+
+### P1
+- [ ] One-tap navigation to pickup and delivery.
+- [ ] Delivery instructions and campus landmarks.
+- [ ] Notifications for offers, cancellations, assignment changes, and delays.
+- [ ] Report delay or delivery issue with a reason.
+- [ ] Earnings/payout ledger distinguishing estimated, earned, and actually settled amounts.
+- [x] Recovery guidance for expired OTP, app restart, and connectivity failure.
+
+### P2
+- [ ] Multi-order route optimization if operations support it.
+- [ ] Workload/shift scheduling if needed.
+- [ ] Delivery performance insights.
+
+## Admin / platform operations features
+
+### P0
+- [x] Searchable all-orders view filtered by order ID, status, date, store, customer, and runner.
+- [x] Runner applications, approval, suspension, and role management with server-enforced authorization.
+- [x] Payment verification status and traceable verification attempts.
+- [x] Exception queue for unresolved payments, delivery failures, and complaints.
+- [x] Order-state and assignment audit history.
+- [x] Store/product/availability controls matching admin permissions.
+- [x] Health visibility for backend, database connectivity, and Make.com integration without exposing secrets.
+
+### P1
+- [ ] Order volume, fulfillment time, cancellation, and failure-rate metrics.
+- [ ] Reconciliation report comparing expected payments with observed notification evidence.
+- [x] Manual exception handling with a reason and audit trail.
+- [ ] Complaint tracking with owner, status, timestamps, and resolution notes.
+- [x] Critical integration configuration checks without printing secret values.
+- [ ] Stock discrepancy and product-unavailability reports.
+
+### P2
+- [ ] Demand forecasting and inventory recommendations.
+- [ ] Campus operations analytics.
+- [ ] Service zones and multi-campus support only if expansion is approved.
+
+## Shared features across all roles
+
+### P0
+- [x] Consistent order status and transitions across customer, store, runner, and admin.
+- [x] One authoritative pricing calculation and consistent persisted totals.
+- [x] Idempotent payment, order, acceptance, pickup, and delivery operations.
+- [x] Server-enforced role-based access and ownership checks.
+- [x] Traceable payment, assignment, pickup, and delivery events.
+- [x] Responsive accessible UI without clipping/overflow.
+- [x] Recovery from network failures, refreshes, expired sessions, and webhook uncertainty.
+- [x] Monitoring for stuck orders, failed webhooks, API errors, and data inconsistencies without logging secrets or sensitive payment data.
+- [x] Support and complaint resolution path.
+
+### P1
+- [ ] Notifications with deduplication and retry behavior.
+- [x] Actionable operational error messages.
+- [ ] Reports with documented metric definitions.
+- [x] Consistent loading, empty, error, and retry UI patterns.
+
+## Feature status ledger
+
+| Feature / area | Status | Evidence / test | Commit SHA |
+|---|---|---|---|
+| Customer: Mobile-Friendly UPI Checkout & URI Parity | VERIFIED | `deviceDetection.test.js`, `customerPaymentFlow.test.js` | `eff2a41` |
+| Customer: Catalogue, Pricing & Checkout Breakdown | VERIFIED | `checkoutValidation.test.js`, `deliveryFee.test.js` | `cb2b871` |
+| Customer: 6-Stage Tracking & Contradiction Elimination | VERIFIED | `orderTrackingUI.test.jsx`, `OrderConfirmationView.jsx` | `32cb379` |
+| Customer: Delivery OTP Retrieval & Recovery | VERIFIED | `CustomerDeliveryOtpCard.jsx`, `ordersOtp.test.js` | `8a296c9` |
+| Customer: Unpaid Order Cancellation & One-Click Reorder | VERIFIED | `customerOrdersActions.test.jsx`, `OrdersPage.jsx` | Current |
+| Runner: Availability Toggle & Offer Eligibility | VERIFIED | `runnerDashboard.test.jsx`, `RunnerAvailabilityToggle.jsx` | `a4cba3a` |
+| Runner: Atomic Order Acceptance Exclusivity | VERIFIED | `orders.test.js`, `atomicOrderSqlContract.test.js` | `768d2d8` |
+| Runner: Multi-Store Pickup Checklist & Store Transitions | VERIFIED | `orders.test.js`, `runnerOrders.js` | `dcb845d` |
+| Runner: Delivery OTP Verification, Lockout & Completion | VERIFIED | `runnerOtpVerification.test.jsx`, `ordersOtp.test.js` | `e24feef` |
+| Runner: Persisted Item Count & Amount Zeroing Fix | VERIFIED | `runnerDashboard.test.jsx`, `DeliveryCard.jsx` | `a4cba3a` |
+| Admin: Runner Applications Approval / Suspension RPC | VERIFIED | `adminAuth.test.jsx`, `admin_set_runner_status` RPC | `e38c0a3` |
+| Admin: Searchable All-Orders View & Status Filters | VERIFIED | `adminOrders.test.js`, `adminConsoleOrders.test.jsx` | Current |
+| Admin: Payment Exception Queue & Resolution | VERIFIED | `adminOrders.test.js`, `AdminConsolePage.jsx` | Current |
+| Admin: Campus Store Availability Controls | VERIFIED | `admin.test.js`, `AdminConsolePage.jsx` | Current |
+| Shared: Make.com Fail-Closed Webhook Verification | VERIFIED | `webhooks.test.js`, `orders.test.js` | `c1f06ac` |
+
+## Progress log
+
+- **2026-10-24 | Milestone 1 — Admin Orders Command Center, Payment Exceptions & Customer Reorder:**
+  - Admin All-Orders Backend: Implemented `handleListOrders` in `server/src/routes/admin.js` (`GET /api/v1/admin/orders` and `POST /admin/orders/list`), strictly enforcing `PERMISSIONS.ORDERS_READ_ALL`. Added filtering by `status`, `paymentStatus`, `storeId`, `runnerId`, and text search.
+  - Mock Server Admin Orders & Store Controls: Added `'admin.orders.list'` and `'stores.update'` handlers in `src/services/mockServer/handlers.js` with permission checks and mock database queries.
+  - Admin Console UI Expansion: Upgraded `src/pages/admin/AdminConsolePage.jsx` with 4 top-level operational tabs: **People & Roles** (existing user/runner controls), **All Orders & Operations** (searchable orders, status pills, item checklists, pricing breakdown, assigned runners), **Payment Exceptions** (unverified/pending payment tracking, UTR audit, re-check payment, window expiration actions), and **Store & Operations** (one-click store open/pause toggle and integration health checks).
+  - Customer Order Actions: Enhanced `src/pages/customer/OrdersPage.jsx` with atomic "Cancel Order" button for `AWAITING_PAYMENT` orders and "Reorder Items" button for delivered/cancelled orders to immediately populate `cartStore`.
+  - Automated Verification: Added 7 backend tests in `server/src/__tests__/adminOrders.test.js`, 2 frontend tests in `src/pages/admin/__tests__/adminConsoleOrders.test.jsx`, 2 unit tests in `src/pages/customer/__tests__/customerOrdersActions.test.jsx`, and 2 mockServer tests in `src/services/mockServer/admin.test.js`.
+  - Full Regression Suite: 35 test files passed, 668 passed, 1 skipped (0 failures), 13 migrations validated, production build passed.

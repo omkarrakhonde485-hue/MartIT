@@ -4,6 +4,7 @@ import { authenticate, requirePermission } from '../middleware/auth.js'
 import { getSupabaseAdmin } from '../config/supabase.js'
 import { ApiError } from '../utils/errors.js'
 import { PERMISSIONS, ROLES } from '../utils/permissions.js'
+import { formatCanonicalOrder } from './orders.js'
 
 export const adminRouter = Router()
 
@@ -331,3 +332,100 @@ adminRouter.post('/admin/runners/setStatus', authenticate, requirePermission(PER
 // Role management
 adminRouter.post('/api/v1/admin/roles', authenticate, requirePermission(PERMISSIONS.ROLES_ASSIGN), handleSetRole)
 adminRouter.post('/admin/roles/set', authenticate, requirePermission(PERMISSIONS.ROLES_ASSIGN), handleSetRole)
+
+/**
+ * List all orders across the platform for administrators.
+ * Supports filtering by status, paymentStatus, storeId, runnerId, and search keyword.
+ */
+async function handleListOrders(req, res, next) {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { status, paymentStatus, storeId, runnerId, search, limit = 100 } =
+      req.method === 'POST' ? req.body || {} : req.query || {}
+
+    let query = supabase
+      .from('orders')
+      .select(`
+        id,
+        customer_id,
+        runner_id,
+        status,
+        payment_status,
+        item_subtotal,
+        combined_delivery_fee,
+        base_amount,
+        platform_fee,
+        total_payable,
+        route_distance_km,
+        delivery_location_snapshot,
+        created_at,
+        updated_at,
+        handover_verified_at,
+        payment_attempt_id,
+        payment_fee_paise,
+        payment_window_expires_at,
+        payment_paid_at,
+        payment_last_verified_at,
+        order_fulfillment_groups (
+          id,
+          store_id,
+          status,
+          order_items (
+            id,
+            product_id,
+            product_name,
+            product_pack,
+            unit_price,
+            quantity,
+            line_subtotal
+          )
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(Number(limit) || 100)
+
+    if (status) {
+      query = query.eq('status', status)
+    }
+    if (paymentStatus) {
+      query = query.eq('payment_status', paymentStatus)
+    }
+    if (runnerId) {
+      query = query.eq('runner_id', runnerId)
+    }
+
+    const { data: rawOrders, error } = await query
+
+    if (error) {
+      console.error('[admin.listOrders] Error querying orders:', error)
+      throw ApiError.internal('Failed to list orders.')
+    }
+
+    let formatted = (rawOrders || []).map((o) => formatCanonicalOrder(o))
+
+    // Optional storeId filtering (stored inside order_fulfillment_groups)
+    if (storeId) {
+      formatted = formatted.filter((o) => o.storeId === storeId)
+    }
+
+    // Optional search filtering (orderId, customer name/phone/id)
+    if (search && typeof search === 'string') {
+      const q = search.trim().toLowerCase()
+      formatted = formatted.filter((o) => {
+        const idMatch = o.id?.toLowerCase().includes(q)
+        const nameMatch = o.customerDetails?.fullName?.toLowerCase().includes(q)
+        const phoneMatch = o.customerDetails?.phoneNumber?.includes(q)
+        const customerIdMatch = o.customerId?.toLowerCase().includes(q)
+        return idMatch || nameMatch || phoneMatch || customerIdMatch
+      })
+    }
+
+    res.status(200).json(formatted)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// Orders management (accessible by admin and super admin with ORDERS_READ_ALL permission)
+adminRouter.get('/api/v1/admin/orders', authenticate, requirePermission(PERMISSIONS.ORDERS_READ_ALL), handleListOrders)
+adminRouter.post('/admin/orders/list', authenticate, requirePermission(PERMISSIONS.ORDERS_READ_ALL), handleListOrders)
