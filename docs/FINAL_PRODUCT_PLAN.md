@@ -133,6 +133,14 @@
 
 ## Progress log
 
+- **2026-10-24 | Customer Catalogue Sorting, Saved Locations, Runner Navigation, Delay Reporting & Earnings Ledger:**
+  - Customer Catalogue Sorting: Added price (low-high, high-low) and alphabetical (name A-Z) sorting in `src/pages/customer/HomePage.jsx` alongside search, categories, and store filters; added accessible sort selector dropdown and active filter chip.
+  - Saved Campus Locations & Delivery Notes: Added local storage address persistence to `src/components/cart/DeliveryDetailsForm.jsx`; provides 1-tap "Save as my default campus address", saved location banner with 1-tap "Apply", and "Clear saved address" actions.
+  - Runner Campus Navigation & Landmark Guide: Added one-tap "Campus Directions & Guide" button to `src/components/runner/DeliveryCard.jsx` with landmark modal, destination contact, and external Google Maps routing.
+  - Runner Operational Delay Reporting: Implemented `handleRunnerReportDelay` in `server/src/routes/orders.js` (`POST /api/v1/runner/orders/:id/report-delay` and `POST /runner/order/reportDelay`) and mock handler `'runner.order.reportDelay'` in `src/services/mockServer/handlers.js` with assignment and active status guards; added interactive Delay Reporting modal and Delay Notice badge in `DeliveryCard.jsx`.
+  - Runner Earnings & Payout Ledger: Implemented `RunnerStatsSummary.jsx` ledger calculating settled today vs in-transit estimated payouts adhering strictly to the standard ₹8 runner delivery fee policy.
+  - Automated Verification: Added 6 backend tests in `server/src/__tests__/runnerDelay.test.js`, 6 frontend/mock tests in `src/pages/runner/__tests__/runnerUsabilityP1.test.jsx`, catalogue sorting tests in `src/components/products/__tests__/catalogue.test.js`, and saved address tests in `src/pages/customer/__tests__/checkoutDetails.test.jsx`. Full test suite: 37 test files passed, 682 passed, 1 skipped (0 failures), production build passed.
+  - Commit SHA: `f95e510`.
 - **2026-10-24 | Admin All-Orders Command Center, Payment Exceptions & Customer Reorder Actions:**
   - Admin Orders API & Server Authorization: Implemented `handleListOrders` in `server/src/routes/admin.js` (`GET /api/v1/admin/orders` and `POST /admin/orders/list`), strictly enforcing `PERMISSIONS.ORDERS_READ_ALL`. Implemented query filtering for `status`, `paymentStatus`, `storeId`, `runnerId`, and substring search (ID, customer name/phone).
   - Mock Server Handlers: Added `'admin.orders.list'` and `'stores.update'` handlers in `src/services/mockServer/handlers.js` with role validation and filtering.

@@ -50,8 +50,8 @@
 
 ### P1
 - [x] Reorder previous purchases.
-- [ ] Product search, category filters, and sorting.
-- [ ] Saved campus locations, delivery instructions, and landmarks.
+- [x] Product search, category filters, and sorting.
+- [x] Saved campus locations, delivery instructions, and landmarks.
 - [x] Cancellation eligibility and clear payment implications.
 - [ ] Notifications for confirmation, preparation, pickup, delays, and delivery.
 - [ ] Favorites and shopping lists.
@@ -95,11 +95,11 @@
 - [x] Correct persisted item counts, order totals, and delivery-fee display.
 
 ### P1
-- [ ] One-tap navigation to pickup and delivery.
-- [ ] Delivery instructions and campus landmarks.
+- [x] One-tap navigation to pickup and delivery.
+- [x] Delivery instructions and campus landmarks.
 - [ ] Notifications for offers, cancellations, assignment changes, and delays.
-- [ ] Report delay or delivery issue with a reason.
-- [ ] Earnings/payout ledger distinguishing estimated, earned, and actually settled amounts.
+- [x] Report delay or delivery issue with a reason.
+- [x] Earnings/payout ledger distinguishing estimated, earned, and actually settled amounts.
 - [x] Recovery guidance for expired OTP, app restart, and connectivity failure.
 
 ### P2
@@ -159,11 +159,16 @@
 | Customer: 6-Stage Tracking & Contradiction Elimination | VERIFIED | `orderTrackingUI.test.jsx`, `OrderConfirmationView.jsx` | `32cb379` |
 | Customer: Delivery OTP Retrieval & Recovery | VERIFIED | `CustomerDeliveryOtpCard.jsx`, `ordersOtp.test.js` | `8a296c9` |
 | Customer: Unpaid Order Cancellation & One-Click Reorder | VERIFIED | `customerOrdersActions.test.jsx`, `OrdersPage.jsx` | `9b59f42` |
+| Customer: Product Search, Category Filters & Sorting | VERIFIED | `catalogue.test.js`, `HomePage.jsx` | `f95e510` |
+| Customer: Saved Campus Delivery Locations & Preferences | VERIFIED | `checkoutDetails.test.jsx`, `DeliveryDetailsForm.jsx` | `f95e510` |
 | Runner: Availability Toggle & Offer Eligibility | VERIFIED | `runnerDashboard.test.jsx`, `RunnerAvailabilityToggle.jsx` | `a4cba3a` |
 | Runner: Atomic Order Acceptance Exclusivity | VERIFIED | `orders.test.js`, `atomicOrderSqlContract.test.js` | `768d2d8` |
 | Runner: Multi-Store Pickup Checklist & Store Transitions | VERIFIED | `orders.test.js`, `runnerOrders.js` | `dcb845d` |
 | Runner: Delivery OTP Verification, Lockout & Completion | VERIFIED | `runnerOtpVerification.test.jsx`, `ordersOtp.test.js` | `e24feef` |
 | Runner: Persisted Item Count & Amount Zeroing Fix | VERIFIED | `runnerDashboard.test.jsx`, `DeliveryCard.jsx` | `a4cba3a` |
+| Runner: Campus Navigation & Landmark Guidance | VERIFIED | `runnerUsabilityP1.test.jsx`, `DeliveryCard.jsx` | `f95e510` |
+| Runner: Operational Delay / Issue Reporting | VERIFIED | `runnerDelay.test.js`, `runnerUsabilityP1.test.jsx` | `f95e510` |
+| Runner: Earnings & Settlement Ledger | VERIFIED | `runnerUsabilityP1.test.jsx`, `RunnerStatsSummary.jsx` | `f95e510` |
 | Admin: Runner Applications Approval / Suspension RPC | VERIFIED | `adminAuth.test.jsx`, `admin_set_runner_status` RPC | `e38c0a3` |
 | Admin: Searchable All-Orders View & Status Filters | VERIFIED | `adminOrders.test.js`, `adminConsoleOrders.test.jsx` | `9b59f42` |
 | Admin: Payment Exception Queue & Resolution | VERIFIED | `adminOrders.test.js`, `AdminConsolePage.jsx` | `9b59f42` |
@@ -172,6 +177,14 @@
 
 ## Progress log
 
+- **2026-10-24 | Milestone 2 — Customer Catalogue Sorting, Saved Locations, Runner Navigation, Delay Reporting & Earnings Ledger:**
+  - Customer Catalogue Sorting: Added price (low-high, high-low) and alphabetical (name A-Z) sorting in `src/pages/customer/HomePage.jsx` alongside search, categories, and store filters; added accessible sort selector dropdown and active filter chip.
+  - Saved Campus Locations & Delivery Notes: Added local storage address persistence to `src/components/cart/DeliveryDetailsForm.jsx`; provides 1-tap "Save as my default campus address", saved location banner with 1-tap "Apply", and "Clear saved address" actions.
+  - Runner Campus Navigation & Landmark Guide: Added one-tap "Campus Directions & Guide" button to `src/components/runner/DeliveryCard.jsx` with landmark modal, destination contact, and external Google Maps routing.
+  - Runner Operational Delay Reporting: Implemented `handleRunnerReportDelay` in `server/src/routes/orders.js` (`POST /api/v1/runner/orders/:id/report-delay` and `POST /runner/order/reportDelay`) and mock handler `'runner.order.reportDelay'` in `src/services/mockServer/handlers.js` with assignment and active status guards; added interactive Delay Reporting modal and Delay Notice badge in `DeliveryCard.jsx`.
+  - Runner Earnings & Payout Ledger: Implemented `RunnerStatsSummary.jsx` ledger calculating settled today vs in-transit estimated payouts adhering strictly to the standard ₹8 runner delivery fee policy.
+  - Automated Verification: Added 6 backend tests in `server/src/__tests__/runnerDelay.test.js`, 6 frontend/mock tests in `src/pages/runner/__tests__/runnerUsabilityP1.test.jsx`, catalogue sorting tests in `src/components/products/__tests__/catalogue.test.js`, and saved address tests in `src/pages/customer/__tests__/checkoutDetails.test.jsx`. Full test suite: 37 test files passed, 682 passed, 1 skipped (0 failures), production build passed.
+  - Commit SHA: `f95e510`.
 - **2026-10-24 | Milestone 1 — Admin Orders Command Center, Payment Exceptions & Customer Reorder:**
   - Admin All-Orders Backend: Implemented `handleListOrders` in `server/src/routes/admin.js` (`GET /api/v1/admin/orders` and `POST /admin/orders/list`), strictly enforcing `PERMISSIONS.ORDERS_READ_ALL`. Added filtering by `status`, `paymentStatus`, `storeId`, `runnerId`, and text search.
   - Mock Server Admin Orders & Store Controls: Added `'admin.orders.list'` and `'stores.update'` handlers in `src/services/mockServer/handlers.js` with permission checks and mock database queries.
