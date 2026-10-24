@@ -158,16 +158,16 @@
 | Customer: Catalogue, Pricing & Checkout Breakdown | VERIFIED | `checkoutValidation.test.js`, `deliveryFee.test.js` | `cb2b871` |
 | Customer: 6-Stage Tracking & Contradiction Elimination | VERIFIED | `orderTrackingUI.test.jsx`, `OrderConfirmationView.jsx` | `32cb379` |
 | Customer: Delivery OTP Retrieval & Recovery | VERIFIED | `CustomerDeliveryOtpCard.jsx`, `ordersOtp.test.js` | `8a296c9` |
-| Customer: Unpaid Order Cancellation & One-Click Reorder | VERIFIED | `customerOrdersActions.test.jsx`, `OrdersPage.jsx` | Current |
+| Customer: Unpaid Order Cancellation & One-Click Reorder | VERIFIED | `customerOrdersActions.test.jsx`, `OrdersPage.jsx` | `9b59f42` |
 | Runner: Availability Toggle & Offer Eligibility | VERIFIED | `runnerDashboard.test.jsx`, `RunnerAvailabilityToggle.jsx` | `a4cba3a` |
 | Runner: Atomic Order Acceptance Exclusivity | VERIFIED | `orders.test.js`, `atomicOrderSqlContract.test.js` | `768d2d8` |
 | Runner: Multi-Store Pickup Checklist & Store Transitions | VERIFIED | `orders.test.js`, `runnerOrders.js` | `dcb845d` |
 | Runner: Delivery OTP Verification, Lockout & Completion | VERIFIED | `runnerOtpVerification.test.jsx`, `ordersOtp.test.js` | `e24feef` |
 | Runner: Persisted Item Count & Amount Zeroing Fix | VERIFIED | `runnerDashboard.test.jsx`, `DeliveryCard.jsx` | `a4cba3a` |
 | Admin: Runner Applications Approval / Suspension RPC | VERIFIED | `adminAuth.test.jsx`, `admin_set_runner_status` RPC | `e38c0a3` |
-| Admin: Searchable All-Orders View & Status Filters | VERIFIED | `adminOrders.test.js`, `adminConsoleOrders.test.jsx` | Current |
-| Admin: Payment Exception Queue & Resolution | VERIFIED | `adminOrders.test.js`, `AdminConsolePage.jsx` | Current |
-| Admin: Campus Store Availability Controls | VERIFIED | `admin.test.js`, `AdminConsolePage.jsx` | Current |
+| Admin: Searchable All-Orders View & Status Filters | VERIFIED | `adminOrders.test.js`, `adminConsoleOrders.test.jsx` | `9b59f42` |
+| Admin: Payment Exception Queue & Resolution | VERIFIED | `adminOrders.test.js`, `AdminConsolePage.jsx` | `9b59f42` |
+| Admin: Campus Store Availability Controls | VERIFIED | `admin.test.js`, `AdminConsolePage.jsx` | `9b59f42` |
 | Shared: Make.com Fail-Closed Webhook Verification | VERIFIED | `webhooks.test.js`, `orders.test.js` | `c1f06ac` |
 
 ## Progress log
@@ -179,3 +179,4 @@
   - Customer Order Actions: Enhanced `src/pages/customer/OrdersPage.jsx` with atomic "Cancel Order" button for `AWAITING_PAYMENT` orders and "Reorder Items" button for delivered/cancelled orders to immediately populate `cartStore`.
   - Automated Verification: Added 7 backend tests in `server/src/__tests__/adminOrders.test.js`, 2 frontend tests in `src/pages/admin/__tests__/adminConsoleOrders.test.jsx`, 2 unit tests in `src/pages/customer/__tests__/customerOrdersActions.test.jsx`, and 2 mockServer tests in `src/services/mockServer/admin.test.js`.
   - Full Regression Suite: 35 test files passed, 668 passed, 1 skipped (0 failures), 13 migrations validated, production build passed.
+  - Commit SHA: `9b59f42`.
