@@ -14,6 +14,7 @@ import {
   CreditCard,
   RefreshCw,
   Search,
+  ArrowUpDown,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useProducts } from '@/hooks/useCatalogue'
@@ -34,6 +35,13 @@ import { ORDER_STATUS } from '@/utils/orderMachine'
 
 const POPULAR_SEARCHES = ['Maggi', 'Toned Milk', 'Cold Coffee', 'Potato Chips', 'Cookies', 'Notebook']
 
+export const SORT_OPTIONS = [
+  { value: 'featured', label: 'Featured' },
+  { value: 'price-asc', label: 'Price: Low to High' },
+  { value: 'price-desc', label: 'Price: High to Low' },
+  { value: 'name-asc', label: 'Name: A to Z' },
+]
+
 export default function HomePage() {
   const user = useAuthStore((s) => s.user)
   const firstName = user?.name?.split(' ')[0] ?? 'there'
@@ -43,6 +51,7 @@ export default function HomePage() {
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedStoreId, setSelectedStoreId] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState('featured') // 'featured' | 'price-asc' | 'price-desc' | 'name-asc'
 
   // Fetch campus catalogue products
   const { data: rawProducts = [], isLoading: isLoadingProducts } = useProducts()
@@ -69,7 +78,7 @@ export default function HomePage() {
     )
   }, [myOrders])
 
-  // Filter products by category, store, budget, and search query
+  // Filter products by category, store, budget, and search query, then sort
   const filteredProducts = useMemo(() => {
     let result = rawProducts
 
@@ -100,13 +109,23 @@ export default function HomePage() {
       })
     }
 
+    // Apply sorting
+    if (sortBy === 'price-asc') {
+      result = [...result].sort((a, b) => Number(a.price) - Number(b.price))
+    } else if (sortBy === 'price-desc') {
+      result = [...result].sort((a, b) => Number(b.price) - Number(a.price))
+    } else if (sortBy === 'name-asc') {
+      result = [...result].sort((a, b) => a.name.localeCompare(b.name))
+    }
+
     return result
-  }, [rawProducts, selectedCategory, selectedStoreId, activeTab, searchQuery])
+  }, [rawProducts, selectedCategory, selectedStoreId, activeTab, searchQuery, sortBy])
 
   const handleResetFilters = () => {
     setSelectedCategory('all')
     setSelectedStoreId('all')
     setSearchQuery('')
+    setSortBy('featured')
   }
 
   const handlePopularSearch = (query) => {
@@ -312,6 +331,20 @@ export default function HomePage() {
                 </span>
               )}
 
+              {sortBy !== 'featured' && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 border border-line px-2.5 py-1 text-ink">
+                  Sort: <strong className="font-semibold">{SORT_OPTIONS.find((s) => s.value === sortBy)?.label || sortBy}</strong>
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('featured')}
+                    aria-label="Reset sorting"
+                    className="rounded-full p-0.5 hover:bg-line text-ink-subtle hover:text-ink"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              )}
+
               <button
                 type="button"
                 onClick={handleResetFilters}
@@ -324,19 +357,42 @@ export default function HomePage() {
 
           {/* Catalogue Grid */}
           <section aria-label="Available products" className="pt-1">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-xl font-bold text-ink">
-                {activeTab === 'budget'
-                  ? 'Student Budget Picks (Under ₹50)'
-                  : selectedStoreId !== 'all'
-                  ? `${selectedStoreName} Items`
-                  : selectedCategory === 'all'
-                  ? 'All Products'
-                  : selectedCategoryName || 'Products'}
-              </h2>
-              <span className="text-xs text-ink-subtle font-medium">
-                {filteredProducts.length} item{filteredProducts.length === 1 ? '' : 's'}
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <h2 className="font-display text-xl font-bold text-ink">
+                  {activeTab === 'budget'
+                    ? 'Student Budget Picks (Under ₹50)'
+                    : selectedStoreId !== 'all'
+                    ? `${selectedStoreName} Items`
+                    : selectedCategory === 'all'
+                    ? 'All Products'
+                    : selectedCategoryName || 'Products'}
+                </h2>
+                <span className="text-xs text-ink-subtle font-medium">
+                  ({filteredProducts.length} item{filteredProducts.length === 1 ? '' : 's'})
+                </span>
+              </div>
+
+              {/* Product Sorting Selector */}
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <label htmlFor="catalogue-sort" className="text-xs text-ink-subtle font-medium flex items-center gap-1 shrink-0">
+                  <ArrowUpDown className="size-3.5 text-brand" aria-hidden="true" />
+                  <span>Sort by:</span>
+                </label>
+                <select
+                  id="catalogue-sort"
+                  data-testid="catalogue-sort-select"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="rounded-tile border border-line bg-surface px-2.5 py-1.5 text-xs font-semibold text-ink focus:border-brand focus:outline-none shadow-1 transition-colors cursor-pointer"
+                >
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <ProductGrid

@@ -1059,6 +1059,60 @@ export function createMockServer({ routingProvider = null } = {}) {
       return customerView
     },
 
+    /**
+     * Records a delay or operational issue reported by the assigned runner.
+     * Enforces runner assignment and active delivery status (PREPARING, PICKED_UP, ON_THE_WAY).
+     */
+    'runner.order.reportDelay': ({ orderId, reason, note = '' }, { token }) => {
+      const user = requirePermission(token, PERMISSIONS.RUNNER_DELIVER)
+      if (!orderId || !reason) {
+        throw new ApiError('INVALID_INPUT', 'Order ID and delay reason code are required.', 400)
+      }
+
+      for (const sample of SAMPLE_ORDERS) {
+        if (!db.orders.some((o) => o.id === sample.id)) {
+          db.orders.push(structuredClone(sample))
+        }
+      }
+
+      const order = db.orders.find((o) => o.id === orderId)
+      if (!order) {
+        throw new ApiError('ORDER_NOT_FOUND', 'Order not found.', 404)
+      }
+      if (order.runnerId !== user.id) {
+        throw new ApiError('FORBIDDEN', 'You are not assigned to this delivery.', 403)
+      }
+
+      const validStatuses = [ORDER_STATUS.PREPARING, ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY]
+      if (!validStatuses.includes(order.status)) {
+        throw new ApiError(
+          'INVALID_ORDER_STATE',
+          `Delays can only be reported for active deliveries (current: ${order.status}).`,
+          400,
+        )
+      }
+
+      const delayReport = {
+        reportedAt: new Date().toISOString(),
+        runnerId: user.id,
+        reason,
+        note: String(note || '').slice(0, 500),
+      }
+
+      if (!Array.isArray(order.delayReports)) {
+        order.delayReports = []
+      }
+      order.delayReports.push(delayReport)
+      order.latestDelayReport = delayReport
+
+      db.saveOrders?.()
+      return {
+        success: true,
+        orderId,
+        delayReport,
+      }
+    },
+
     // ---- customer order & delivery OTP endpoints ----------------------------
     /**
      * Retrieves the delivery OTP challenge for the authenticated customer.

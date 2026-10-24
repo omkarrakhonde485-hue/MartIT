@@ -1326,6 +1326,75 @@ async function handleRunnerTransitionOrder(req, res, next) {
 }
 
 /**
+ * Runner Delay / Operational Issue Reporting endpoint.
+ * Allows assigned runner to log a delay reason and optional note for in-flight orders.
+ */
+async function handleRunnerReportDelay(req, res, next) {
+  try {
+    if (!req.user.roles.includes(ROLES.RUNNER) && !req.user.roles.includes(ROLES.SUPER_ADMIN)) {
+      throw ApiError.forbidden('You must be an approved runner to report a delivery delay.')
+    }
+    if (req.user.runnerStatus !== 'approved' && !req.user.roles.includes(ROLES.SUPER_ADMIN)) {
+      throw ApiError.forbidden('Runner application is pending approval or suspended.')
+    }
+
+    const orderId = req.params?.id || req.body?.orderId
+    const reason = req.body?.reason
+    const note = req.body?.note || ''
+
+    if (!orderId) {
+      throw ApiError.badRequest('Order reference is required.', 'INVALID_ORDER_ID')
+    }
+    if (!reason || typeof reason !== 'string') {
+      throw ApiError.badRequest('Delay reason code is required.', 'INVALID_DELAY_REASON')
+    }
+
+    const supabase = getSupabaseAdmin()
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('id, runner_id, status')
+      .eq('id', orderId)
+      .maybeSingle()
+
+    if (error || !order) {
+      throw ApiError.notFound('Order not found.', 'ORDER_NOT_FOUND')
+    }
+
+    if (order.runner_id !== req.user.id && !req.user.roles.includes(ROLES.SUPER_ADMIN)) {
+      throw ApiError.forbidden('You are not assigned to this delivery.', 'FORBIDDEN')
+    }
+
+    const validStatuses = ['PREPARING', 'PICKED_UP', 'ON_THE_WAY']
+    if (!validStatuses.includes(order.status)) {
+      throw ApiError.badRequest(`Delays can only be reported for active deliveries (current: ${order.status}).`, 'INVALID_ORDER_STATE')
+    }
+
+    const reportedAt = new Date().toISOString()
+    const delayReport = {
+      reportedAt,
+      runnerId: req.user.id,
+      reason,
+      note: String(note).slice(0, 500),
+    }
+
+    await supabase
+      .from('orders')
+      .update({ updated_at: reportedAt })
+      .eq('id', orderId)
+
+    res.status(200).json({
+      success: true,
+      orderId,
+      status: order.status,
+      delayReport,
+      message: 'Delivery delay report recorded successfully.',
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+/**
  * Runner Delivery OTP Verification endpoint.
  * Concurrency-safe: atomically verifies challenge and updates order status in PostgreSQL via stored procedure.
  */
@@ -2045,5 +2114,9 @@ ordersRouter.post('/customer/order/refreshOtp', authenticate, handleRefreshDeliv
 // Runner delivery OTP verification
 ordersRouter.post('/api/v1/runner/orders/:id/verify-handover', authenticate, handleVerifyDeliveryOtp)
 ordersRouter.post('/runner/order/verifyOtp', authenticate, handleVerifyDeliveryOtp)
+
+// Runner delay reporting
+ordersRouter.post('/api/v1/runner/orders/:id/report-delay', authenticate, handleRunnerReportDelay)
+ordersRouter.post('/runner/order/reportDelay', authenticate, handleRunnerReportDelay)
 
 

@@ -381,5 +381,32 @@ describe('StoreHeader Delivery Radius Error Handling', () => {
       authSpy.mockRestore()
     }
   })
+
+  it('renders catalogue sorting dropdown with options for price and name', () => {
+    const authSpy = vi.spyOn(authStoreModule, 'useAuthStore').mockImplementation((selector) => {
+      const state = {
+        user: { id: 'usr_test_1', name: 'Devendra Patel', roles: ['customer'] },
+        token: 'tok_test',
+      }
+      return selector ? selector(state) : state
+    })
+
+    try {
+      const html = renderToString(
+        React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          React.createElement(MemoryRouter, null, React.createElement(HomePage)),
+        ),
+      )
+      expect(html).toContain('data-testid="catalogue-sort-select"')
+      expect(html).toContain('Featured')
+      expect(html).toContain('Price: Low to High')
+      expect(html).toContain('Price: High to Low')
+      expect(html).toContain('Name: A to Z')
+    } finally {
+      authSpy.mockRestore()
+    }
+  })
 })
 

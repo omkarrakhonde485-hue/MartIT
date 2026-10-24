@@ -9,6 +9,10 @@ import {
   CheckCircle2,
   KeyRound,
   AlertCircle,
+  Navigation,
+  AlertTriangle,
+  ExternalLink,
+  X,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { OrderStatusPill } from '@/components/ui/Badge'
@@ -20,6 +24,14 @@ import { SAMPLE_DELIVERY_LOCATIONS } from '@/mocks/campus'
 import { getOrderPickups, areAllPickupsComplete, getStoreDisplayName } from '@/utils/runnerOrders'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/utils/cn'
+
+export const DELAY_REASONS = [
+  { code: 'STORE_DELAY', label: 'Store Delay (Items still preparing)' },
+  { code: 'CUSTOMER_UNREACHABLE', label: 'Customer Unreachable (Phone unanswered)' },
+  { code: 'BAD_WEATHER', label: 'Severe Campus Weather / Heavy Rain' },
+  { code: 'SECURITY_CHECK', label: 'Campus / Hostel Gate Security Delay' },
+  { code: 'OTHER', label: 'Other Operational Delay' },
+]
 
 
 /**
@@ -164,6 +176,19 @@ export function DeliveryCard({ order, onAction, isOnline = true, currentRunnerId
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [otpError, setOtpError] = useState('')
 
+  // Navigation & Delay Reporting state (P1 Usability)
+  const [showNavModal, setShowNavModal] = useState(false)
+  const [showDelayModal, setShowDelayModal] = useState(false)
+  const [delayReason, setDelayReason] = useState('STORE_DELAY')
+  const [delayNote, setDelayNote] = useState('')
+  const [isSubmittingDelay, setIsSubmittingDelay] = useState(false)
+
+  const latestReport =
+    order.latestDelayReport ||
+    (Array.isArray(order.delayReports) && order.delayReports.length > 0
+      ? order.delayReports[order.delayReports.length - 1]
+      : null)
+
   const authUserId = useAuthStore((s) => s.user?.id)
   const currentUserId = currentRunnerId ?? authUserId
   const isAssignedToCaller = order.runnerId ? currentUserId === order.runnerId : true
@@ -187,7 +212,23 @@ export function DeliveryCard({ order, onAction, isOnline = true, currentRunnerId
     }
   }
 
+  const handleDelaySubmit = async (e) => {
+    e?.preventDefault()
+    if (!delayReason) return
+    setIsSubmittingDelay(true)
+    try {
+      await onAction?.(order, 'report-delay', { reason: delayReason, note: delayNote })
+      setShowDelayModal(false)
+      setDelayNote('')
+    } catch {
+      // Error handled by dashboard action toast
+    } finally {
+      setIsSubmittingDelay(false)
+    }
+  }
+
   return (
+    <>
     <Card
       className={cn(
         'p-4 sm:p-5 flex flex-col justify-between gap-4 transition-all hover:shadow-2 border-line min-w-0 w-full',
@@ -317,9 +358,35 @@ export function DeliveryCard({ order, onAction, isOnline = true, currentRunnerId
                 <span className="truncate" title={`Recipient: ${recipientName}`}>{`Recipient: ${recipientName}`}</span>
               </p>
             )}
+            <button
+              type="button"
+              onClick={() => setShowNavModal(true)}
+              data-testid={`btn-directions-${order.id}`}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand hover:underline mt-1 cursor-pointer"
+            >
+              <Navigation className="size-3" aria-hidden="true" />
+              <span>Campus Directions & Guide</span>
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Delay Reported Notice */}
+      {latestReport && (
+        <div
+          className="flex items-start gap-1.5 rounded-tile bg-warning/10 border border-warning/30 px-2.5 py-1.5 text-xs text-warning animate-fade-in min-w-0"
+          data-testid={`delay-badge-${order.id}`}
+        >
+          <AlertTriangle className="size-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="min-w-0">
+            <span className="font-bold">Delay Reported: </span>
+            <span>{DELAY_REASONS.find((r) => r.code === latestReport.reason)?.label || latestReport.reason}</span>
+            {latestReport.note && (
+              <p className="text-[11px] text-ink-muted truncate mt-0.5">{latestReport.note}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Item Summary */}
       <div className="rounded-tile bg-surface-2/60 border border-line/60 p-2.5 text-xs min-w-0">
@@ -522,9 +589,192 @@ export function DeliveryCard({ order, onAction, isOnline = true, currentRunnerId
               )}
             </div>
           )}
+
+          {/* Report Delay Button for active deliveries */}
+          {(isPreparing || isPickedUp || isOnTheWay) && isAssignedToCaller && (
+            <Button
+              type="button"
+              size="sm"
+              tone="neutral"
+              onClick={() => setShowDelayModal(true)}
+              data-testid={`btn-report-delay-${order.id}`}
+              className="text-[10px] font-semibold text-ink-muted hover:text-ink gap-1 shrink-0 ml-1"
+            >
+              <AlertTriangle className="size-3 text-warning" aria-hidden="true" />
+              <span>Report Delay</span>
+            </Button>
+          )}
         </div>
       </div>
     </Card>
+
+    {/* Campus Directions & Landmarks Guide Modal */}
+    {showNavModal && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`nav-modal-title-${order.id}`}
+        data-testid={`directions-modal-${order.id}`}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-xs animate-fade-in"
+      >
+        <div className="w-full max-w-md rounded-card border border-line bg-surface p-5 shadow-2 space-y-4">
+          <div className="flex items-center justify-between border-b border-line pb-2.5">
+            <div className="flex items-center gap-2 text-ink">
+              <Navigation className="size-4 text-brand" aria-hidden="true" />
+              <h3 id={`nav-modal-title-${order.id}`} className="font-display text-base font-bold text-ink">
+                Campus Directions & Guide
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowNavModal(false)}
+              aria-label="Close directions modal"
+              className="p-1 text-ink-subtle hover:text-ink rounded-full hover:bg-surface-2 transition-colors cursor-pointer"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="space-y-3 text-xs">
+            <div className="rounded-tile border border-line bg-surface-2/40 p-3 space-y-1">
+              <p className="text-[10px] uppercase font-bold text-ink-subtle">Pickup Outlet</p>
+              <p className="font-bold text-sm text-ink">{singleStoreName}</p>
+            </div>
+
+            <div className="rounded-tile border border-line bg-surface-2/40 p-3 space-y-1">
+              <p className="text-[10px] uppercase font-bold text-ink-subtle">Drop Destination</p>
+              <p className="font-bold text-sm text-ink">{destination}</p>
+              {detailedAddress && (
+                <p className="text-xs text-ink-muted mt-1">
+                  <strong className="text-ink">Landmarks / Instructions: </strong>
+                  {detailedAddress}
+                </p>
+              )}
+              {recipientName && (
+                <p className="text-[11px] text-ink-subtle mt-1">
+                  Recipient Contact: {recipientName}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-line/60">
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${destination} campus`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid={`external-maps-link-${order.id}`}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand hover:underline"
+            >
+              <span>Open in Maps</span>
+              <ExternalLink className="size-3" aria-hidden="true" />
+            </a>
+
+            <Button
+              size="sm"
+              tone="neutral"
+              onClick={() => setShowNavModal(false)}
+              className="text-xs"
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Report Delay Modal */}
+    {showDelayModal && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`delay-modal-title-${order.id}`}
+        data-testid={`delay-modal-${order.id}`}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-xs animate-fade-in"
+      >
+        <form
+          onSubmit={handleDelaySubmit}
+          className="w-full max-w-md rounded-card border border-line bg-surface p-5 shadow-2 space-y-4"
+        >
+          <div className="flex items-center justify-between border-b border-line pb-2.5">
+            <div className="flex items-center gap-2 text-ink">
+              <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
+              <h3 id={`delay-modal-title-${order.id}`} className="font-display text-base font-bold text-ink">
+                Report Delivery Delay
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDelayModal(false)}
+              aria-label="Close delay modal"
+              className="p-1 text-ink-subtle hover:text-ink rounded-full hover:bg-surface-2 transition-colors cursor-pointer"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="space-y-3 text-xs">
+            <div>
+              <label htmlFor={`delay-reason-${order.id}`} className="block font-semibold text-ink mb-1">
+                Delay Reason
+              </label>
+              <select
+                id={`delay-reason-${order.id}`}
+                data-testid={`delay-reason-select-${order.id}`}
+                value={delayReason}
+                onChange={(e) => setDelayReason(e.target.value)}
+                className="w-full rounded-tile border border-line bg-surface px-3 py-2 text-xs font-medium text-ink focus:border-brand focus:outline-none"
+              >
+                {DELAY_REASONS.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor={`delay-note-${order.id}`} className="block font-semibold text-ink mb-1">
+                Additional Note (Optional)
+              </label>
+              <textarea
+                id={`delay-note-${order.id}`}
+                data-testid={`delay-note-input-${order.id}`}
+                value={delayNote}
+                onChange={(e) => setDelayNote(e.target.value)}
+                rows={3}
+                placeholder="e.g. Waiting at hostel gate, caller dialed twice..."
+                className="w-full rounded-tile border border-line bg-surface p-2.5 text-xs text-ink focus:border-brand focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-line/60">
+            <Button
+              type="button"
+              size="sm"
+              tone="neutral"
+              onClick={() => setShowDelayModal(false)}
+              disabled={isSubmittingDelay}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              tone="brand"
+              loading={isSubmittingDelay}
+              data-testid={`submit-delay-btn-${order.id}`}
+              className="text-xs font-semibold"
+            >
+              Submit Delay Report
+            </Button>
+          </div>
+        </form>
+      </div>
+    )}
+    </>
   )
 }
 

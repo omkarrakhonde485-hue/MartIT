@@ -20,6 +20,7 @@ import { useRunnerStore } from '@/stores/runnerStore'
 import { useAuthStore } from '@/stores/authStore'
 import { runnerService } from '@/services/runnerService'
 import { ORDER_STATUS } from '@/utils/orderMachine'
+import { splitDeliveryFee } from '@/utils/deliveryFee'
 import { isMockBackend } from '@/config/env'
 
 /**
@@ -80,7 +81,20 @@ export default function RunnerDashboardPage() {
   const activeCount = assignedOrders.length + inProgressOrders.length
   const completedCount = completedOrders.length
 
-  // Action handler for Milestone 2 (Acceptance, Pickups, State Transitions)
+  // Derived earnings for payout ledger
+  const earnedTotal = completedOrders.reduce((sum, o) => {
+    const fee = Number(o.deliveryFee || o.delivery_fee || 10)
+    const split = splitDeliveryFee(fee)
+    return sum + (split.runnerPayout ?? 0)
+  }, 0)
+
+  const activeEstimatedTotal = [...assignedOrders, ...inProgressOrders].reduce((sum, o) => {
+    const fee = Number(o.deliveryFee || o.delivery_fee || 10)
+    const split = splitDeliveryFee(fee)
+    return sum + (split.runnerPayout ?? 0)
+  }, 0)
+
+  // Action handler for Runner Actions (Acceptance, Pickups, State Transitions, Delay Reporting)
   const handleOrderAction = async (order, actionType, payload = {}) => {
     if (actionInProgress) return
     setActionInProgress(true)
@@ -127,6 +141,14 @@ export default function RunnerDashboardPage() {
         await queryClient.invalidateQueries({ queryKey: ['runner-orders'] })
         refetch()
         return verified
+      }
+
+      if (actionType === 'report-delay') {
+        await runnerService.reportDelay(order.id, { reason: payload.reason, note: payload.note })
+        toast.success(`Delay report recorded for delivery #${order.id}.`)
+        await queryClient.invalidateQueries({ queryKey: ['runner-orders'] })
+        refetch()
+        return
       }
     } catch (err) {
       toast.error(err.message || 'Operation failed. Please try again.')
@@ -214,6 +236,8 @@ export default function RunnerDashboardPage() {
         availableCount={availableCount}
         activeCount={activeCount}
         completedCount={completedCount}
+        earnedTotal={earnedTotal}
+        activeEstimatedTotal={activeEstimatedTotal}
         selectedTab={activeTab}
         onSelectTab={setActiveTab}
       />

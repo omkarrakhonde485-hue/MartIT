@@ -433,4 +433,24 @@ describe('Checkout Customer Details and Campus Address Selection', () => {
     expect(html).toContain('overflow-y-auto')
     expect(html).toContain('max-h-48')
   })
+
+  // 14. Saved campus address preference
+  it('renders save campus address preference button and controls', () => {
+    const html = renderToString(
+      <DeliveryDetailsForm
+        details={{
+          fullName: 'Aarav Patel',
+          mobileNumber: '9876543210',
+          presetLocation: 'Hostel 3',
+          customLocation: '',
+          deliveryInstructions: 'Room 204',
+        }}
+        errors={{}}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('data-testid="save-delivery-location-btn"')
+    expect(html).toContain('Save as my default campus address')
+  })
 })
