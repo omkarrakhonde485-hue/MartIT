@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { Router } from 'express'
+import QRCode from 'qrcode'
 import { authenticate } from '../middleware/auth.js'
 import { getSupabaseAdmin } from '../config/supabase.js'
 import { ApiError } from '../utils/errors.js'
@@ -950,6 +951,54 @@ export async function handleReallocatePayment(req, res, next) {
     }
 
     const formatted = formatCanonicalOrder(updatedOrder)
+
+    // Dynamic UPI deep link URI and SVG QR code
+    const payeeVpa = process.env.UPI_PAYEE_VPA || env.UPI_PAYEE_VPA || 'omkarrakhonde485@oksbi'
+    const payeeName = process.env.UPI_PAYEE_NAME || env.UPI_PAYEE_NAME || 'MartIT'
+
+    const totalPayable = Number(formatted.pricing?.total ?? updatedOrder.total_payable ?? 0)
+    const params = new URLSearchParams()
+    params.set('pa', payeeVpa)
+    params.set('pn', payeeName)
+    params.set('am', totalPayable.toFixed(2))
+    params.set('cu', 'INR')
+    params.set('tn', `MartIT Order ${order.id}`)
+    params.set('tr', order.id)
+    const upiUri = `upi://pay?${params.toString()}`
+
+    let qrCodeSvg = null
+    try {
+      qrCodeSvg = await QRCode.toString(upiUri, {
+        type: 'svg',
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: {
+          dark: '#0b1410',
+          light: '#ffffff',
+        },
+      })
+    } catch (qrErr) {
+      console.warn('[handleReallocatePayment] Non-fatal: QR SVG generation failed', qrErr?.message)
+    }
+
+    formatted.upiUri = upiUri
+    formatted.qrCode = qrCodeSvg
+
+    const previousAttempt = {
+      attemptId: order.payment_attempt_id || order.id,
+      feePaise: order.fee_paise,
+      platformFee: Number(order.platform_fee),
+      allocatedAt: order.payment_allocated_at,
+      expiredAt: new Date(now).toISOString(),
+    }
+    formatted.payment = {
+      ...formatted.payment,
+      history: [
+        ...(Array.isArray(order.payment?.history) ? order.payment.history : []),
+        previousAttempt,
+      ],
+    }
+
     recentReallocations.set(order.id, { order: formatted, timestamp: Date.now() })
 
     return res.status(200).json(formatted)
@@ -961,6 +1010,9 @@ export async function handleReallocatePayment(req, res, next) {
     }
   }
 }
+
+export const handleRetryPayment = handleReallocatePayment
+export const inFlightPaymentRetries = inFlightPaymentReallocations
 
 /**
  * GET /api/v1/runner/orders - Authenticated runner's assigned orders.

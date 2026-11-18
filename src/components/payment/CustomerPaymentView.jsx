@@ -271,6 +271,8 @@ export function CustomerPaymentView({ initialOrder, onOrderUpdate }) {
       const newExpiry = parseTimestampMs(updatedOrder?.payment?.windowExpiresAt)
       if (newExpiry) {
         setRemainingMs(Math.max(0, newExpiry - Date.now()))
+      } else {
+        setRemainingMs(5 * 60 * 1000)
       }
     } catch (err) {
       setActionError(err.message || 'Could not retry payment allocation. Please try again.')
@@ -410,6 +412,7 @@ export function CustomerPaymentView({ initialOrder, onOrderUpdate }) {
                 variant="primary"
                 size="md"
                 loading={isRetrying}
+                disabled={isRetrying}
                 onClick={handleRetryPayment}
                 className="font-semibold shadow-1"
               >
@@ -474,6 +477,7 @@ export function CustomerPaymentView({ initialOrder, onOrderUpdate }) {
                   orderId={order.id}
                   paymentStatus={order.paymentStatus}
                   isExpired={isExpired}
+                  qrCode={order.qrCode}
                   className="py-2"
                 />
 
@@ -520,6 +524,7 @@ export function CustomerPaymentView({ initialOrder, onOrderUpdate }) {
                   variant="primary"
                   size="md"
                   loading={isRetrying}
+                  disabled={isRetrying}
                   onClick={handleRetryPayment}
                   className="mx-auto"
                 >
