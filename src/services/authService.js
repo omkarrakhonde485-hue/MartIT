@@ -119,8 +119,13 @@ export const authService = {
       throw new ApiError('INVALID_ROLE', 'Valid role selection (customer or runner) is required.', 400)
     }
 
+    const cleanEmail = email?.trim().toLowerCase() || ''
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new ApiError('INVALID_EMAIL', 'Please enter a valid email address.', 400)
+    }
+
     if (isMockBackend) {
-      return request('auth.signup', { email, password, name, phone, role: cleanRole })
+      return request('auth.signup', { email: cleanEmail, password, name, phone, role: cleanRole })
     }
 
     const supabase = getSupabaseClient()
@@ -135,7 +140,7 @@ export const authService = {
     const emailRedirectTo = `${origin}/login`
 
     const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: cleanEmail,
       password,
       options: {
         emailRedirectTo,

@@ -78,7 +78,15 @@ export default function SignupPage() {
     setFieldErrors((prev) => ({ ...prev, [fieldName]: err }))
   }
 
+  const handleRoleChange = (newRole) => {
+    if (formError) setFormError(null)
+    setRole(newRole)
+  }
+
   const handleChange = (fieldName, val) => {
+    // Reset previous error messages when user modifies input
+    if (formError) setFormError(null)
+
     if (fieldName === 'name') setName(val)
     else if (fieldName === 'email') setEmail(val)
     else if (fieldName === 'phone') setPhone(val)
@@ -140,7 +148,8 @@ export default function SignupPage() {
 
     setSubmitting(true)
     try {
-      const result = await signup(emailRes.value, passwordRes.value, {
+      const cleanEmail = emailRes.normalized || emailRes.value.trim().toLowerCase()
+      const result = await signup(cleanEmail, passwordRes.value, {
         name: nameRes.value,
         phone: phoneRes.national ? phoneRes.national : undefined,
         role,
@@ -338,11 +347,11 @@ export default function SignupPage() {
               role="radio"
               aria-checked={role === 'customer'}
               tabIndex={0}
-              onClick={() => setRole('customer')}
+              onClick={() => handleRoleChange('customer')}
               onKeyDown={(e) => {
                 if (e.key === ' ' || e.key === 'Enter') {
                   e.preventDefault()
-                  setRole('customer')
+                  handleRoleChange('customer')
                 }
               }}
               className={cn(
@@ -381,11 +390,11 @@ export default function SignupPage() {
               role="radio"
               aria-checked={role === 'runner'}
               tabIndex={0}
-              onClick={() => setRole('runner')}
+              onClick={() => handleRoleChange('runner')}
               onKeyDown={(e) => {
                 if (e.key === ' ' || e.key === 'Enter') {
                   e.preventDefault()
-                  setRole('runner')
+                  handleRoleChange('runner')
                 }
               }}
               className={cn(

@@ -5,6 +5,7 @@ import { setTokenProvider, setOnUnauthorizedHandler } from '@/services/api'
 import { zustandSafeStorage } from '@/utils/storage'
 import { isMockBackend } from '@/config/env'
 import { validateSupabaseConfig } from '@/config/supabaseClient'
+import { useCartStore } from '@/stores/cartStore'
 
 let authSubscription = null
 
@@ -268,15 +269,21 @@ export const useAuthStore = create(
        * Email/password sign-up.
        */
       async signup(email, password, metadata) {
-        const result = await authService.signup(email, password, metadata)
-        if (result.session) {
-          set({ session: result.session, token: result.session.access_token })
-          if (metadata?.role === 'runner') {
-            await authService.applyRunner()
+        try {
+          const result = await authService.signup(email, password, metadata)
+          if (result.session) {
+            set({ session: result.session, token: result.session.access_token })
+            if (metadata?.role === 'runner') {
+              await authService.applyRunner()
+            }
+            const profileUser = await authService.me()
+            set({ user: profileUser })
+            return { user: profileUser, needsConfirmation: false }
           }
-          const profileUser = await authService.me()
-          set({ user: profileUser })
-          return { user: profileUser, needsConfirmation: false }
+          return { user: result.authUser, needsConfirmation: result.needsConfirmation }
+        } catch (err) {
+          set({ session: null, token: null, user: null })
+          throw err
         }
         return {
           user: result.authUser,
@@ -352,6 +359,12 @@ export const useAuthStore = create(
       async logout() {
         try {
           await authService.logout()
+        } catch {
+          // ignore
+        }
+        try {
+          useCartStore.getState().clear()
+          useCartStore.getState().resetCheckoutDetails()
         } catch {
           // ignore
         }
